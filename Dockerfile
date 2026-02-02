@@ -7,9 +7,6 @@ RUN apk add --no-cache git
 # Устанавливаем рабочую директорию в контейнере
 WORKDIR /app
 
-# Копируем go.mod и go.sum (если они существуют)
-COPY go.mod go.sum ./
-
 # Если go.mod не существует, инициализируем модуль
 RUN if [ ! -f go.mod ]; then go mod init max-bot; fi
 
