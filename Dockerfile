@@ -45,4 +45,3 @@ EXPOSE 8080
 
 # Запускаем бота
 CMD ["./max-bot"]
-EOF
