@@ -37,9 +37,6 @@ WORKDIR /root/
 # Копируем бинарный файл из первого образа
 COPY --from=builder /app/max-bot .
 
-# Копируем .env.example как шаблон
-COPY .env.example . 2>/dev/null || echo ".env.example not found"
-
 # Открываем порт (если потребуется в будущем)
 EXPOSE 8080
 
