@@ -7,11 +7,3 @@ services:
     restart: unless-stopped
     env_file:
       - .env
-    volumes:
-      - ./logs:/app/logs  # Если планируется логирование в файл
-    networks:
-      - max-bot-network
-
-networks:
-  max-bot-network:
-    driver: bridge
