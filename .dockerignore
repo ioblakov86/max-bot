@@ -1,0 +1,9 @@
+.git
+.gitignore
+README.md
+Dockerfile
+.dockerignore
+*.env
+!.env.example
+go.mod
+go.sum

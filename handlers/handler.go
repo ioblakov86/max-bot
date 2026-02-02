@@ -13,23 +13,74 @@ import (
 
 // MessageStorage stores messages for analysis
 type MessageStorage struct {
-	messages []schemes.Message
+	// Map of chatID to slice of messages
+	messages map[int64][]schemes.Message
 	mutex    sync.RWMutex
+}
+
+// NewMessageStorage creates a new message storage
+func NewMessageStorage() *MessageStorage {
+	return &MessageStorage{
+		messages: make(map[int64][]schemes.Message),
+	}
 }
 
 // AddMessage adds a message to storage
 func (ms *MessageStorage) AddMessage(msg schemes.Message) {
 	ms.mutex.Lock()
 	defer ms.mutex.Unlock()
-	ms.messages = append(ms.messages, msg)
+
+	// Determine the chat ID to store the message under
+	// For group chats, use ChatId directly
+	// For private chats, we could use a different identifier if needed
+	chatID := msg.Recipient.ChatId
+
+	// Initialize slice if needed
+	if _, exists := ms.messages[chatID]; !exists {
+		ms.messages[chatID] = make([]schemes.Message, 0)
+	}
+
+	ms.messages[chatID] = append(ms.messages[chatID], msg)
 }
 
-// GetMessageHistory returns stored messages
-func (ms *MessageStorage) GetMessageHistory() []schemes.Message {
+// GetMessageHistory returns stored messages for a specific chat
+func (ms *MessageStorage) GetMessageHistory(chatID int64) []schemes.Message {
 	ms.mutex.RLock()
 	defer ms.mutex.RUnlock()
-	result := make([]schemes.Message, len(ms.messages))
-	copy(result, ms.messages)
+
+	result := make([]schemes.Message, len(ms.messages[chatID]))
+	copy(result, ms.messages[chatID])
+	return result
+}
+
+// GetAllChats returns all chat IDs that have stored messages
+func (ms *MessageStorage) GetAllChats() []int64 {
+	ms.mutex.RLock()
+	defer ms.mutex.RUnlock()
+
+	chats := make([]int64, 0, len(ms.messages))
+	for chatID := range ms.messages {
+		chats = append(chats, chatID)
+	}
+	return chats
+}
+
+// GetMessageHistoryForLastN returns the last N messages for a specific chat
+func (ms *MessageStorage) GetMessageHistoryForLastN(chatID int64, n int) []schemes.Message {
+	ms.mutex.RLock()
+	defer ms.mutex.RUnlock()
+
+	allMessages := ms.messages[chatID]
+
+	if len(allMessages) <= n {
+		result := make([]schemes.Message, len(allMessages))
+		copy(result, allMessages)
+		return result
+	}
+
+	startIndex := len(allMessages) - n
+	result := make([]schemes.Message, n)
+	copy(result, allMessages[startIndex:])
 	return result
 }
 
@@ -44,7 +95,7 @@ type MessageHandler struct {
 func NewMessageHandler(bot *bot.BotClient) *MessageHandler {
 	handler := &MessageHandler{
 		Bot:          bot,
-		MessageStore: &MessageStorage{},
+		MessageStore: NewMessageStorage(),
 		AdminUserID:  79310071775, // Установим ID администратора
 	}
 	return handler
@@ -63,13 +114,14 @@ func (h *MessageHandler) Handle(update schemes.UpdateInterface) error {
 
 		log.Printf("Received message from %d: %s", msg.Sender.UserId, msg.Body.Text)
 
+		// Determine if this is a group chat or private chat
+		isGroupChat := msg.Recipient.ChatType != schemes.DIALOG
+
 		// Store all messages for future analysis (except bot's own messages)
+		// According to requirements, bot should read and store messages from groups where it's a member
 		if msg.Sender.UserId != 0 { // Assuming bot's user ID is 0 or we can determine it differently
 			h.MessageStore.AddMessage(msg)
 		}
-
-		// Determine if this is a group chat or private chat
-		isGroupChat := msg.Recipient.ChatType != schemes.DIALOG
 
 		// Check if someone is mentioning the bot in a group chat
 		botMentioned := h.isBotMentioned(msg.Body.Text)
@@ -96,6 +148,7 @@ func (h *MessageHandler) Handle(update schemes.UpdateInterface) error {
 		}
 
 		// For group chats (without mentioning bot), just store the message and don't respond
+		// The message has already been stored above
 		return nil
 	}
 
@@ -136,18 +189,24 @@ func (h *MessageHandler) handleAdminCommands(msg schemes.Message) error {
 	case contains(text, []string{"help", "помощь"}):
 		responseText = "Команды администратора: привет, помощь, статистика, история"
 	case contains(text, []string{"статистика", "stats"}):
-		messageCount := len(h.MessageStore.GetMessageHistory())
-		responseText = fmt.Sprintf("Общее количество сообщений в хранилище: %d", messageCount)
+		chats := h.MessageStore.GetAllChats()
+		totalMessages := 0
+		for _, chatID := range chats {
+			history := h.MessageStore.GetMessageHistory(chatID)
+			totalMessages += len(history)
+		}
+		responseText = fmt.Sprintf("Общее количество сообщений в хранилище: %d в %d чатах", totalMessages, len(chats))
 	case contains(text, []string{"история", "history"}):
-		history := h.MessageStore.GetMessageHistory()
+		// Get history for the current chat
+		history := h.MessageStore.GetMessageHistory(msg.Recipient.ChatId)
 		if len(history) == 0 {
-			responseText = "История сообщений пуста."
+			responseText = "История сообщений в этом чате пуста."
 		} else {
 			count := len(history)
 			if count > 5 {
 				count = 5 // Show only last 5 messages
 			}
-			responseText = fmt.Sprintf("Последние %d сообщений:", count)
+			responseText = fmt.Sprintf("Последние %d сообщений в этом чате:", count)
 			for i := len(history) - count; i < len(history); i++ {
 				msgTime := time.Unix(history[i].Timestamp, 0)
 				responseText += fmt.Sprintf("\n- [%s] %s: %s",
@@ -178,8 +237,8 @@ func (h *MessageHandler) handlePrivateMessage(msg schemes.Message) error {
 	switch {
 	case contains(text, []string{"привет", "здравствуй", "добрый день", "hello", "hi", "hey"}):
 		responseText = "Привет! Я Max Bot. Чем могу помочь?"
-	case contains(text, []string{"help", "помощь"}):
-		responseText = "Я простой бот. Вы можете поздороваться, попросить помощи или просто пообщаться со мной!"
+	case contains(text, []string{"help", "помощь", "/help"}):
+		responseText = "Доступные команды:\n- привет: Приветственное сообщение\n- помощь или /help: Показать это сообщение\n- время: Текущее время\n- повтори [текст]: Повторить за вами текст\n- /last или последние: Последние сообщения в этом чате"
 	case contains(text, []string{"time", "время", "час", "времени"}):
 		currentTime := time.Unix(msg.Timestamp, 0)
 		responseText = fmt.Sprintf("Текущее время: %s", currentTime.Format("2006-01-02 15:04:05"))
@@ -190,6 +249,21 @@ func (h *MessageHandler) handlePrivateMessage(msg schemes.Message) error {
 			responseText = "Эхо... эхо... эхо..."
 		} else {
 			responseText = "Вы сказали: " + responseText
+		}
+	case contains(text, []string{"/last", "последние", "last"}):
+		// Get last messages from the current chat
+		history := h.MessageStore.GetMessageHistoryForLastN(msg.Recipient.ChatId, 5)
+		if len(history) == 0 {
+			responseText = "В этом чате нет сохраненных сообщений."
+		} else {
+			responseText = fmt.Sprintf("Последние %d сообщений в этом чате:", len(history))
+			for _, msgItem := range history {
+				msgTime := time.Unix(msgItem.Timestamp, 0)
+				responseText += fmt.Sprintf("\n- [%s] %s: %s",
+					msgTime.Format("2006-01-02 15:04"),
+					msgItem.Sender.Name,
+					msgItem.Body.Text)
+			}
 		}
 	default:
 		responseText = "Я получил ваше сообщение: \"" + msg.Body.Text + "\". Я простой бот и могу отвечать на базовые команды вроде 'привет' или 'помощь'."

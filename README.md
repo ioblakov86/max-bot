@@ -1,132 +1,157 @@
 # Max Bot
 
-A simple bot implementation for Max Messenger using Go.
+Простая реализация бота для Max Messenger на языке Go.
 
-## Features
+## Возможности
 
-- Send and receive messages in Russian
-- Basic command handling (hello, help, time, echo)
-- Group chat support with message storage for future analysis
-- Special admin commands for designated user (+79310071775)
-- Proper handling of bot mentions in group chats
-- Rate limiting to prevent API abuse
-- Graceful shutdown handling
-- Environment-based configuration
+- Отправка и получение сообщений на русском языке
+- Базовая обработка команд (приветствие, помощь, время, эхо)
+- Поддержка групповых чатов с хранением сообщений по чатам для последующего анализа
+- Специальные команды администратора для указанного пользователя (+79310071775)
+- Правильная обработка упоминаний бота в групповых чатах
+- Ограничение частоты запросов для предотвращения злоупотребления API
+- Корректная обработка завершения работы
+- Конфигурация через переменные окружения
+- Команда для получения последних сообщений из чата
+- Расширенная команда помощи для всех пользователей
 
-## Prerequisites
+## Требования
 
-- Go 1.16 or later
-- A Max Messenger bot token
-- GitHub CLI (for synchronization with GitHub)
+- Go 1.16 или выше
+- Токен бота Max Messenger
+- GitHub CLI (для синхронизации с GitHub)
 
-## Setup
+## Установка
 
-1. Clone or download this repository
-2. Install dependencies:
+1. Клонируйте или скачайте этот репозиторий
+2. Установите зависимости:
 
 ```bash
 go mod tidy
 ```
 
-3. Set up your bot token either as an environment variable or in a .env file:
+3. Настройте токен бота либо как переменную окружения, либо в файле .env:
 
-Option 1: Environment variable
+Вариант 1: Переменная окружения
 ```bash
-export MAX_BOT_TOKEN="your_bot_token_here"
+export MAX_BOT_TOKEN="ваш_токен_бота_здесь"
 ```
 
-On Windows:
+В Windows:
 ```cmd
-set MAX_BOT_TOKEN=your_bot_token_here
+set MAX_BOT_TOKEN=ваш_токен_бота_здесь
 ```
 
-Option 2: Create a .env file in the project root with your token:
+Вариант 2: Создайте файл .env в корне проекта с вашим токеном:
 ```
-MAX_BOT_TOKEN=your_bot_token_here
+MAX_BOT_TOKEN=ваш_токен_бота_здесь
 ```
 
-Note: A .env file template is provided as .env.example that you can copy and modify.
+Примечание: Шаблон файла .env предоставляется в виде .env.example, который можно скопировать и изменить.
 
-## How to Run
+## Как запустить
 
-1. Make sure you have set the `MAX_BOT_TOKEN` either as an environment variable or in a .env file
-2. Run the bot:
+1. Убедитесь, что вы установили `MAX_BOT_TOKEN` как переменную окружения или в файле .env
+2. Запустите бота:
 
 ```bash
 go run main.go
 ```
 
-The bot will start and begin listening for messages.
+Бот запустится и начнет прослушивание сообщений.
 
-## Configuration
+## Запуск с использованием Docker
 
-The bot uses the following environment variables:
+1. Убедитесь, что у вас установлены Docker и Docker Compose
+2. Создайте файл `.env` в корне проекта с вашим токеном:
 
-- `MAX_BOT_TOKEN`: Your Max Messenger bot token (required)
+```
+MAX_BOT_TOKEN=ваш_токен_бота_здесь
+```
 
-## Supported Commands
+3. Соберите и запустите контейнер:
 
-### For all users (in private messages):
-- `привет`, `здравствуй`, `добрый день`, `hello`, `hi`, `hey`: Greeting response
-- `помощь`, `help`: Help information
-- `время`, `time`: Current timestamp
-- `повтори [text]`, `скажи [text]`, `echo [text]`: Echoes back the provided text
+```bash
+docker-compose up -d --build
+```
 
-### For admin user (+79310071775) (in private messages):
-- `привет`, `здравствуй`, `добрый день`, `hello`, `hi`, `hey`: Admin greeting
-- `помощь`, `help`: Admin commands list
-- `статистика`, `stats`: Total message count in storage
-- `история`, `history`: Last 5 messages from storage
+Бот будет запущен в фоновом режиме. Для остановки используйте:
 
-### Group chat behavior:
-- When bot is mentioned (with "@bot", "бот," "бот " etc.), responds with "Извините, я пока не умею разговаривать."
-- All messages in group chats are stored for future analysis
-- Bot does not respond to other messages in group chats
+```bash
+docker-compose down
+```
 
-## Project Structure
+## Конфигурация
+
+Бот использует следующие переменные окружения:
+
+- `MAX_BOT_TOKEN`: Ваш токен бота Max Messenger (обязательно)
+
+## Поддерживаемые команды
+
+### Для всех пользователей (в личных сообщениях):
+- `привет`, `здравствуй`, `добрый день`, `hello`, `hi`, `hey`: Приветствие
+- `помощь`, `help`, `/help`: Информация о помощи
+- `время`, `time`: Текущая метка времени
+- `повтори [текст]`, `скажи [текст]`, `echo [текст]`: Повторить предоставленный текст
+- `/last`, `последние`, `last`: Получить последние сообщения из текущего чата
+
+### Для администратора (+79310071775) (в личных сообщениях):
+- `привет`, `здравствуй`, `добрый день`, `hello`, `hi`, `hey`: Приветствие администратора
+- `помощь`, `help`: Список команд администратора
+- `статистика`, `stats`: Общее количество сообщений в хранилище во всех чатах
+- `история`, `history`: Последние 5 сообщений из текущего чата
+
+### Поведение в групповом чате:
+- Когда бота упоминают (с помощью "@bot", "бот," "бот " и т.д.), отвечает "Извините, я пока не умею разговаривать."
+- Все сообщения в групповых чатах сохраняются по чатам для последующего анализа
+- Бот не отвечает на другие сообщения в групповых чатах, кроме случаев упоминания
+- Пользователи могут использовать команду `/last` или `последние` для получения последних сообщений из группового чата
+
+## Структура проекта
 
 ```
 max-bot/
 ├── bot/
-│   └── client.go       # Bot API client implementation
+│   └── client.go       # Реализация клиента API бота
 ├── handlers/
-│   └── handler.go      # Message handling logic with message storage
+│   └── handler.go      # Логика обработки сообщений с хранением
 ├── utils/
-│   └── utils.go        # Utility functions
-├── main.go             # Main application entry point
-├── example.go          # Example usage
-├── go.mod              # Go module definition
-├── go.sum              # Go module checksums
-└── README.md           # This file
+│   └── utils.go        # Вспомогательные функции
+├── main.go             # Точка входа в основное приложение
+├── example.go          # Пример использования
+├── go.mod              # Определение модуля Go
+├── go.sum              # Контрольные суммы модуля Go
+└── README.md           # Этот файл
 ```
 
-## Extending the Bot
+## Расширение возможностей бота
 
-To add new functionality:
+Чтобы добавить новую функциональность:
 
-1. Modify `handlers/handler.go` to add new command handlers
-2. Update the `Handle` function to recognize new commands
-3. Add any necessary helper functions
+1. Измените `handlers/handler.go`, чтобы добавить новые обработчики команд
+2. Обновите функцию `Handle`, чтобы распознавать новые команды
+3. Добавьте необходимые вспомогательные функции
 
-## Synchronization with GitHub
+## Синхронизация с GitHub
 
-This project supports synchronization with GitHub using GitHub CLI:
+Этот проект поддерживает синхронизацию с GitHub с использованием GitHub CLI:
 
-1. Make sure you have GitHub CLI installed and authenticated
-2. Commit your changes:
+1. Убедитесь, что у вас установлен и аутентифицирован GitHub CLI
+2. Зафиксируйте изменения:
 ```bash
 git add .
-git commit -m "Your commit message"
+git commit -m "Сообщение вашего коммита"
 ```
-3. Push to GitHub:
+3. Отправьте в GitHub:
 ```bash
 gh repo sync
 ```
-Or alternatively:
+Или в качестве альтернативы:
 ```bash
 git push origin main
 ```
 
-## License
+## Лицензия
 
-This project is open source and available under the MIT License.
+Этот проект с открытым исходным кодом и доступен по лицензии MIT.
