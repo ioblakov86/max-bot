@@ -7,17 +7,22 @@ RUN apk add --no-cache git
 # Устанавливаем рабочую директорию в контейнере
 WORKDIR /app
 
-# Если go.mod не существует, инициализируем модуль
-RUN if [ ! -f go.mod ]; then go mod init max-bot; fi
-
-# Копируем все исходные файлы
+# Копируем только main.go сначала
 COPY main.go ./
 COPY bot/ ./bot/
 COPY handlers/ ./handlers/
 COPY utils/ ./utils/
 
-# Загружаем зависимости (если go.mod существует) или создаем tidy
-RUN if [ -f go.mod ]; then go mod download; else go mod tidy; fi
+# Инициализируем модуль Go
+RUN go mod init max-bot
+
+# Добавляем необходимые зависимости
+RUN go get github.com/joho/godotenv
+RUN go get github.com/max-messenger/max-bot-api-client-go
+RUN go get github.com/max-messenger/max-bot-api-client-go/schemes
+
+# Завершаем настройку модуля
+RUN go mod tidy
 
 # Собираем бинарный файл для Linux
 RUN CGO_ENABLED=0 GOOS=linux go build -a -installsuffix cgo -o max-bot main.go
