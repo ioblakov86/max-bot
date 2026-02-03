@@ -11,6 +11,20 @@ import (
 	schemes "github.com/max-messenger/max-bot-api-client-go/schemes"
 )
 
+/*
+Команды бота:
+
+Для всех пользователей:
+- /help - получить список доступных команд
+- /echo [text] - повторить за пользователем текст
+
+Для администратора:
+- /help - получить список всех команд (включая администраторские)
+- /echo [text] - повторить за пользователем текст
+- /last - получить последние сохраненные сообщения из текущего чата
+- /stat - получить статистику сохраненных сообщений с группировкой по чатам
+*/
+
 // MessageStorage stores messages for analysis
 type MessageStorage struct {
 	messages map[int64][]schemes.Message
@@ -131,7 +145,7 @@ func (h *MessageHandler) isBotMentioned(text string) bool {
 	lowerText := strings.ToLower(text)
 
 	// Check for bot mentions
-	keywords := []string{"@bot", "бот,", "бот ", "бот!", "бот?"}
+	keywords := []string{"@bot"}
 	for _, keyword := range keywords {
 		if strings.Contains(lowerText, keyword) {
 			return true
@@ -155,74 +169,22 @@ func (h *MessageHandler) handlePrivateMessage(msg schemes.Message) error {
 
 // handleAdminCommands handles special commands for admin user
 func (h *MessageHandler) handleAdminCommands(msg schemes.Message) error {
-	text := strings.ToLower(strings.TrimSpace(msg.Body.Text))
+	text := strings.TrimSpace(msg.Body.Text)
 
 	switch {
-	case contains(text, []string{"привет", "здравствуй", "добрый день", "hello", "hi", "hey"}):
-		return h.sendSimpleResponse(msg.Recipient.ChatId, "Привет! Это специальный режим для администратора.")
-	case contains(text, []string{"help", "помощь"}):
-		helpText := "Доступные команды для администратора:\n- привет: Приветственное сообщение\n- помощь или /help: Показать это сообщение\n- статистика: Общее количество сообщений в хранилище\n- история: Последние 5 сообщений из текущего чата\n- время: Текущее время\n- повтори [текст]: Повторить за вами текст\n- /last или последние: Последние сообщения в этом чате"
+	case text == "/help":
+		helpText := "Доступные команды администратора:\n- /help: Показать это справку\n- /echo [text]: Повторить за вами текст\n- /last: Последние сохраненные сообщения из текущего чата\n- /stat: Статистика сохраненных сообщений с группировкой по чатам"
 		return h.sendSimpleResponse(msg.Recipient.ChatId, helpText)
-	case contains(text, []string{"статистика", "stats"}):
-		chats := h.MessageStore.GetAllChats()
-		totalMessages := 0
-		for _, chatID := range chats {
-			history := h.MessageStore.GetMessageHistory(chatID)
-			totalMessages += len(history)
-		}
-		return h.sendSimpleResponse(msg.Recipient.ChatId, fmt.Sprintf("Общее количество сообщений в хранилище: %d в %d чатах", totalMessages, len(chats)))
-	case contains(text, []string{"история", "history"}):
-		history := h.MessageStore.GetMessageHistory(msg.Recipient.ChatId)
-		if len(history) == 0 {
-			return h.sendSimpleResponse(msg.Recipient.ChatId, "История сообщений в этом чате пуста.")
-		}
-
-		count := len(history)
-		if count > 5 {
-			count = 5
-		}
-
-		responseText := fmt.Sprintf("Последние %d сообщений в этом чате:", count)
-		for i := len(history) - count; i < len(history); i++ {
-			msgTime := time.Unix(history[i].Timestamp, 0)
-			responseText += fmt.Sprintf("\n- [%s] %s: %s",
-				msgTime.Format("2006-01-02 15:04"),
-				history[i].Sender.Name,
-				history[i].Body.Text)
-		}
-		return h.sendSimpleResponse(msg.Recipient.ChatId, responseText)
-	default:
-		return h.sendSimpleResponse(msg.Recipient.ChatId, "Простите, я не понимаю эту команду. Напишите 'помощь' для получения списка команд.")
-	}
-}
-
-// handleRegularCommands handles commands for regular users
-func (h *MessageHandler) handleRegularCommands(msg schemes.Message) error {
-	text := strings.ToLower(strings.TrimSpace(msg.Body.Text))
-
-	switch {
-	case contains(text, []string{"привет", "здравствуй", "добрый день", "hello", "hi", "hey"}):
-		return h.sendSimpleResponse(msg.Recipient.ChatId, "Привет! Я Max Bot. Чем могу помочь?")
-	case contains(text, []string{"help", "помощь", "/help"}):
-		var helpText string
-		if msg.Sender.UserId == h.AdminUserID {
-			helpText = "Доступные команды для администратора:\n- привет: Приветственное сообщение\n- помощь или /help: Показать это сообщение\n- статистика: Общее количество сообщений в хранилище\n- история: Последние 5 сообщений из текущего чата\n- время: Текущее время\n- повтори [текст]: Повторить за вами текст\n- /last или последние: Последние сообщения в этом чате"
-		} else {
-			helpText = "Доступные команды:\n- привет: Приветственное сообщение\n- помощь или /help: Показать это сообщение\n- время: Текущее время\n- повтори [текст]: Повторить за вами текст\n- /last или последние: Последние сообщения в этом чате"
-		}
-		return h.sendSimpleResponse(msg.Recipient.ChatId, helpText)
-	case contains(text, []string{"time", "время", "час", "времени"}):
-		currentTime := time.Unix(msg.Timestamp, 0)
-		return h.sendSimpleResponse(msg.Recipient.ChatId, fmt.Sprintf("Текущее время: %s", currentTime.Format("2006-01-02 15:04:05")))
-	case contains(text, []string{"echo", "повтори", "скажи"}):
-		responseText := extractAfterCommand(text, []string{"echo", "повтори", "скажи"})
+	case strings.HasPrefix(text, "/echo"):
+		responseText := strings.TrimPrefix(text, "/echo")
+		responseText = strings.TrimSpace(responseText)
 		if responseText == "" {
 			responseText = "Эхо... эхо... эхо..."
 		} else {
 			responseText = "Вы сказали: " + responseText
 		}
 		return h.sendSimpleResponse(msg.Recipient.ChatId, responseText)
-	case contains(text, []string{"/last", "последние", "last"}):
+	case text == "/last":
 		history := h.MessageStore.GetMessageHistoryForLastN(msg.Recipient.ChatId, 5)
 		if len(history) == 0 {
 			return h.sendSimpleResponse(msg.Recipient.ChatId, "В этом чате нет сохраненных сообщений.")
@@ -237,8 +199,39 @@ func (h *MessageHandler) handleRegularCommands(msg schemes.Message) error {
 				msgItem.Body.Text)
 		}
 		return h.sendSimpleResponse(msg.Recipient.ChatId, responseText)
+	case text == "/stat":
+		chats := h.MessageStore.GetAllChats()
+		responseText := fmt.Sprintf("Статистика сообщений по чатам (%d):\n", len(chats))
+		for _, chatID := range chats {
+			history := h.MessageStore.GetMessageHistory(chatID)
+			responseText += fmt.Sprintf("- Chat %d: %d сообщений\n", chatID, len(history))
+		}
+		return h.sendSimpleResponse(msg.Recipient.ChatId, responseText)
 	default:
-		responseText := fmt.Sprintf("Я получил ваше сообщение: \"%s\". Я простой бот и могу отвечать на базовые команды вроде 'привет' или 'помощь'.", msg.Body.Text)
+		responseText := fmt.Sprintf("Неизвестная команда. Используйте /help для получения списка команд.")
+		return h.sendSimpleResponse(msg.Recipient.ChatId, responseText)
+	}
+}
+
+// handleRegularCommands handles commands for regular users
+func (h *MessageHandler) handleRegularCommands(msg schemes.Message) error {
+	text := strings.TrimSpace(msg.Body.Text)
+
+	switch {
+	case text == "/help":
+		helpText := "Доступные команды:\n- /help: Показать это справку\n- /echo [text]: Повторить за вами текст"
+		return h.sendSimpleResponse(msg.Recipient.ChatId, helpText)
+	case strings.HasPrefix(text, "/echo"):
+		responseText := strings.TrimPrefix(text, "/echo")
+		responseText = strings.TrimSpace(responseText)
+		if responseText == "" {
+			responseText = "Эхо... эхо... эхо..."
+		} else {
+			responseText = "Вы сказали: " + responseText
+		}
+		return h.sendSimpleResponse(msg.Recipient.ChatId, responseText)
+	default:
+		responseText := fmt.Sprintf("Неизвестная команда. Используйте /help для получения списка команд.")
 		return h.sendSimpleResponse(msg.Recipient.ChatId, responseText)
 	}
 }
@@ -253,30 +246,4 @@ func (h *MessageHandler) sendSimpleResponse(chatID int64, text string) error {
 	return nil
 }
 
-// extractAfterCommand extracts text after specified commands
-func extractAfterCommand(text string, commands []string) string {
-	lowerText := strings.ToLower(text)
 
-	for _, cmd := range commands {
-		if strings.Contains(lowerText, cmd+" ") {
-			parts := strings.SplitN(lowerText, cmd+" ", 2)
-			if len(parts) > 1 {
-				originalParts := strings.SplitN(text, cmd+" ", 2)
-				return strings.TrimSpace(originalParts[1])
-			}
-		}
-	}
-
-	return ""
-}
-
-// contains checks if any of the substrings exist in the text
-func contains(text string, substrings []string) bool {
-	lowerText := strings.ToLower(text)
-	for _, s := range substrings {
-		if strings.Contains(lowerText, s) {
-			return true
-		}
-	}
-	return false
-}
