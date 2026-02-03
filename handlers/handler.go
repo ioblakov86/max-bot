@@ -71,11 +71,11 @@ type MessageHandler struct {
 }
 
 // NewMessageHandler creates a new message handler
-func NewMessageHandler(bot *bot.BotClient) *MessageHandler {
+func NewMessageHandler(bot *bot.BotClient, adminUserID int64) *MessageHandler {
 	return &MessageHandler{
 		Bot:          bot,
 		MessageStore: NewMessageStorage(),
-		AdminUserID:  79310071775,
+		AdminUserID:  adminUserID,
 	}
 }
 

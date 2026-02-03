@@ -2,9 +2,11 @@ package main
 
 import (
 	"context"
+	"fmt"
 	"log"
 	"os"
 	"os/signal"
+	"strconv"
 	"syscall"
 
 	"max-bot/bot"
@@ -26,11 +28,24 @@ func main() {
 		log.Fatal("MAX_BOT_TOKEN environment variable is required")
 	}
 
+	// Get admin user ID from environment variable
+	adminUserID := int64(0)
+	if adminUserIDStr := os.Getenv("ADMIN_USER_ID"); adminUserIDStr != "" {
+		var err error
+		adminUserID, err = strconv.ParseInt(adminUserIDStr, 10, 64)
+		if err != nil {
+			log.Printf("Failed to parse ADMIN_USER_ID: %v, using default value", err)
+			adminUserID = 0
+		}
+	} else {
+		log.Println("ADMIN_USER_ID not set, using default value")
+	}
+
 	// Create bot client
 	client := bot.NewBotClient(token)
 
 	// Create message handler
-	handler := handlers.NewMessageHandler(client)
+	handler := handlers.NewMessageHandler(client, adminUserID)
 
 	// Create context with cancellation for graceful shutdown
 	ctx, cancel := context.WithCancel(context.Background())

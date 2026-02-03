@@ -7,3 +7,16 @@ services:
     restart: unless-stopped
     env_file:
       - .env
+    environment:
+      - MAX_BOT_TOKEN=${MAX_BOT_TOKEN}
+      - ADMIN_USER_ID=${ADMIN_USER_ID}
+    volumes:
+      - ./logs:/app/logs  # Если планируется логирование в файл
+    ports:
+      - "8080:8080"  # Открываем порт, если потребуется в будущем
+    networks:
+      - max-bot-network
+
+networks:
+  max-bot-network:
+    driver: bridge
