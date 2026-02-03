@@ -117,26 +117,38 @@ func (h *MessageHandler) Handle(update schemes.UpdateInterface) error {
 	}
 
 	msg := msgUpdate.Message
-	log.Printf("Received message from %d: %s", msg.Sender.UserId, msg.Body.Text)
+	log.Printf("Received message - UserID: %d, ChatID: %d, ChatType: %v, Text: %s",
+		msg.Sender.UserId, msg.Recipient.ChatId, msg.Recipient.ChatType, msg.Body.Text)
 
-	// Store all messages except bot's own messages
+	// Store all messages from all chats except bot's own messages
 	if msg.Sender.UserId != 0 {
 		h.MessageStore.AddMessage(msg)
+		log.Printf("Stored message in chat %d, total messages in this chat: %d",
+			msg.Recipient.ChatId, len(h.MessageStore.GetMessageHistory(msg.Recipient.ChatId)))
+	} else {
+		log.Printf("Ignoring message from bot itself")
 	}
 
 	isGroupChat := msg.Recipient.ChatType != schemes.DIALOG
+	log.Printf("Chat type check - Is group/channel: %v, ChatType: %v", isGroupChat, msg.Recipient.ChatType)
+
 	botMentioned := h.isBotMentioned(msg.Body.Text)
+	log.Printf("Bot mention check - Text: '%s', Mentioned: %v", msg.Body.Text, botMentioned)
 
 	// Handle group chat mentions
 	if isGroupChat && botMentioned {
+		log.Printf("Responding to bot mention in chat %d", msg.Recipient.ChatId)
 		return h.sendSimpleResponse(msg.Recipient.ChatId, "Извините, я пока не умею разговаривать.")
 	}
 
 	// Handle private messages
 	if !isGroupChat {
+		log.Printf("Processing private message for user %d", msg.Sender.UserId)
 		return h.handlePrivateMessage(msg)
 	}
 
+	log.Printf("Message from group/channel %d processed, no response needed", msg.Recipient.ChatId)
+	// For group chats, just store the message and don't respond (unless mentioned, handled above)
 	return nil
 }
 
@@ -145,7 +157,7 @@ func (h *MessageHandler) isBotMentioned(text string) bool {
 	lowerText := strings.ToLower(text)
 
 	// Check for bot mentions
-	keywords := []string{"@bot"}
+	keywords := []string{"@bot", "бот,", "бот ", "bot,", "bot "}
 	for _, keyword := range keywords {
 		if strings.Contains(lowerText, keyword) {
 			return true
