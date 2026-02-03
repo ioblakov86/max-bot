@@ -152,11 +152,13 @@ func (h *MessageHandler) handleAdminCommands(msg schemes.Message) error {
 		helpText := "Доступные команды для администратора:\n- привет: Приветственное сообщение\n- помощь или /help: Показать это сообщение\n- статистика: Общее количество сообщений в хранилище\n- история: Последние 5 сообщений из текущего чата\n- время: Текущее время\n- повтори [текст]: Повторить за вами текст\n- /last или последние: Последние сообщения в этом чате"
 		return h.sendSimpleResponse(msg.Recipient.ChatId, helpText)
 	case contains(text, []string{"статистика", "stats"}):
+		chats := h.MessageStore.GetAllChats()
 		totalMessages := 0
-		for _, chatMessages := range h.MessageStore.messages {
-			totalMessages += len(chatMessages)
+		for _, chatID := range chats {
+			history := h.MessageStore.GetMessageHistory(chatID)
+			totalMessages += len(history)
 		}
-		return h.sendSimpleResponse(msg.Recipient.ChatId, fmt.Sprintf("Общее количество сообщений в хранилище: %d", totalMessages))
+		return h.sendSimpleResponse(msg.Recipient.ChatId, fmt.Sprintf("Общее количество сообщений в хранилище: %d в %d чатах", totalMessages, len(chats)))
 	case contains(text, []string{"история", "history"}):
 		history := h.MessageStore.GetMessageHistory(msg.Recipient.ChatId)
 		if len(history) == 0 {
