@@ -149,7 +149,8 @@ func (h *MessageHandler) handleAdminCommands(msg schemes.Message) error {
 	case contains(text, []string{"привет", "здравствуй", "добрый день", "hello", "hi", "hey"}):
 		return h.sendSimpleResponse(msg.Recipient.ChatId, "Привет! Это специальный режим для администратора.")
 	case contains(text, []string{"help", "помощь"}):
-		return h.sendSimpleResponse(msg.Recipient.ChatId, "Команды администратора: привет, помощь, статистика, история")
+		helpText := "Доступные команды для администратора:\n- привет: Приветственное сообщение\n- помощь или /help: Показать это сообщение\n- статистика: Общее количество сообщений в хранилище\n- история: Последние 5 сообщений из текущего чата\n- время: Текущее время\n- повтори [текст]: Повторить за вами текст\n- /last или последние: Последние сообщения в этом чате"
+		return h.sendSimpleResponse(msg.Recipient.ChatId, helpText)
 	case contains(text, []string{"статистика", "stats"}):
 		totalMessages := 0
 		for _, chatMessages := range h.MessageStore.messages {
@@ -189,7 +190,12 @@ func (h *MessageHandler) handleRegularCommands(msg schemes.Message) error {
 	case contains(text, []string{"привет", "здравствуй", "добрый день", "hello", "hi", "hey"}):
 		return h.sendSimpleResponse(msg.Recipient.ChatId, "Привет! Я Max Bot. Чем могу помочь?")
 	case contains(text, []string{"help", "помощь", "/help"}):
-		helpText := "Доступные команды:\n- привет: Приветственное сообщение\n- помощь или /help: Показать это сообщение\n- время: Текущее время\n- повтори [текст]: Повторить за вами текст\n- /last или последние: Последние сообщения в этом чате"
+		var helpText string
+		if msg.Sender.UserId == h.AdminUserID {
+			helpText = "Доступные команды для администратора:\n- привет: Приветственное сообщение\n- помощь или /help: Показать это сообщение\n- статистика: Общее количество сообщений в хранилище\n- история: Последние 5 сообщений из текущего чата\n- время: Текущее время\n- повтори [текст]: Повторить за вами текст\n- /last или последние: Последние сообщения в этом чате"
+		} else {
+			helpText = "Доступные команды:\n- привет: Приветственное сообщение\n- помощь или /help: Показать это сообщение\n- время: Текущее время\n- повтори [текст]: Повторить за вами текст\n- /last или последние: Последние сообщения в этом чате"
+		}
 		return h.sendSimpleResponse(msg.Recipient.ChatId, helpText)
 	case contains(text, []string{"time", "время", "час", "времени"}):
 		currentTime := time.Unix(msg.Timestamp, 0)
