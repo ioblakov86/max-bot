@@ -63,6 +63,18 @@ func (ms *MessageStorage) GetMessageHistoryForLastN(chatID int64, n int) []schem
 	return result
 }
 
+// GetAllChats returns all chat IDs that have stored messages
+func (ms *MessageStorage) GetAllChats() []int64 {
+	ms.mutex.RLock()
+	defer ms.mutex.RUnlock()
+
+	chats := make([]int64, 0, len(ms.messages))
+	for chatID := range ms.messages {
+		chats = append(chats, chatID)
+	}
+	return chats
+}
+
 // MessageHandler handles incoming messages
 type MessageHandler struct {
 	Bot           *bot.BotClient
