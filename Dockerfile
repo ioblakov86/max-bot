@@ -29,5 +29,8 @@ WORKDIR /root/
 # Копируем бинарный файл из первого образа
 COPY --from=builder /app/max-bot .
 
+# Копируем файл промпта из первого образа
+COPY --from=builder /app/prompt.txt .
+
 # Запускаем бота
 CMD ["./max-bot"]
