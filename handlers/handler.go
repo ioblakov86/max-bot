@@ -98,7 +98,7 @@ type MessageHandler struct {
 	Bot            *bot.BotClient
 	MessageStore   *MessageStorage
 	AdminUserID    int64  // Admin user ID: +79310071775
-	AdminChatID    int64  // Admin's private chat ID (set when admin interacts with bot)
+	AdminChatID    int64  // Admin's chat ID for notifications (from environment variable)
 	TrackedChatID  int64  // ID of the chat to track for AI analysis
 	AIAnalyzer     *ai.OpenRouterConfig
 }
@@ -113,6 +113,17 @@ func NewMessageHandler(bot *bot.BotClient, adminUserID int64) *MessageHandler {
 			log.Printf("Failed to parse CHAT_ID: %v, using default value", err)
 		} else {
 			trackedChatID = id
+		}
+	}
+
+	// Load admin chat ID from environment
+	adminChatID := int64(0)
+	if adminChatIDStr := os.Getenv("ADMIN_CHAT_ID"); adminChatIDStr != "" {
+		id, err := strconv.ParseInt(adminChatIDStr, 10, 64)
+		if err != nil {
+			log.Printf("Failed to parse ADMIN_CHAT_ID: %v, using default value", err)
+		} else {
+			adminChatID = id
 		}
 	}
 
@@ -147,7 +158,7 @@ func NewMessageHandler(bot *bot.BotClient, adminUserID int64) *MessageHandler {
 		Bot:           bot,
 		MessageStore:  NewMessageStorage(),
 		AdminUserID:   adminUserID,
-		AdminChatID:   0, // Will be set when admin interacts with the bot
+		AdminChatID:   adminChatID, // Use the chat ID from environment variable
 		TrackedChatID: trackedChatID,
 		AIAnalyzer:    ai.NewOpenRouterConfig(prompt),
 	}
@@ -198,8 +209,8 @@ func (h *MessageHandler) Handle(update schemes.UpdateInterface) error {
 	if !isGroupChat {
 		log.Printf("Processing private message for user %d", msg.Sender.UserId)
 
-		// If this is the admin, update their chat ID for future notifications
-		if msg.Sender.UserId == h.AdminUserID {
+		// If this is the admin and the admin chat ID wasn't set via environment variable, update it for future notifications
+		if msg.Sender.UserId == h.AdminUserID && h.AdminChatID == 0 {
 			h.AdminChatID = msg.Recipient.ChatId
 			log.Printf("Updated admin chat ID to %d", h.AdminChatID)
 		}
@@ -345,16 +356,8 @@ func (h *MessageHandler) analyzeMessageWithAI(msg schemes.Message) {
 				return
 			}
 
-			// Determine if this is a group chat by checking the recipient type
-			isGroupChat := msg.Recipient.ChatType != schemes.DIALOG
-
-			// Determine the admin's chat ID to send the message to
+			// Use the admin's chat ID from environment variable or previously set value
 			adminChatID := h.AdminChatID
-
-			// If we don't have the admin's chat ID yet, try to use the current message's chat if it's from the admin in a private chat
-			if adminChatID == 0 && msg.Sender.UserId == h.AdminUserID && !isGroupChat {
-				adminChatID = msg.Recipient.ChatId
-			}
 
 			// Only send if we have a valid chat ID
 			if adminChatID != 0 {
@@ -365,7 +368,7 @@ func (h *MessageHandler) analyzeMessageWithAI(msg schemes.Message) {
 					log.Printf("Successfully sent AI analysis to admin's chat %d", adminChatID)
 				}
 			} else {
-				log.Printf("Cannot send AI analysis to admin: admin chat ID not available")
+				log.Printf("Cannot send AI analysis to admin: ADMIN_CHAT_ID not set in environment variables")
 			}
 		}
 	} else {
