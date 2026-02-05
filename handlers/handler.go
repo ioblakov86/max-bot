@@ -3,10 +3,13 @@ package handlers
 import (
 	"fmt"
 	"log"
+	"os"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
 
+	"max-bot/ai"
 	"max-bot/bot"
 	schemes "github.com/max-messenger/max-bot-api-client-go/schemes"
 )
@@ -91,17 +94,48 @@ func (ms *MessageStorage) GetAllChats() []int64 {
 
 // MessageHandler handles incoming messages
 type MessageHandler struct {
-	Bot           *bot.BotClient
-	MessageStore  *MessageStorage
-	AdminUserID   int64 // Admin user ID: +79310071775
+	Bot            *bot.BotClient
+	MessageStore   *MessageStorage
+	AdminUserID    int64  // Admin user ID: +79310071775
+	TrackedChatID  int64  // ID of the chat to track for AI analysis
+	AIAnalyzer     *ai.OpenRouterConfig
 }
 
 // NewMessageHandler creates a new message handler
 func NewMessageHandler(bot *bot.BotClient, adminUserID int64) *MessageHandler {
+	// Load tracked chat ID from environment
+	trackedChatID := int64(0)
+	if trackedChatIDStr := os.Getenv("CHAT_ID"); trackedChatIDStr != "" {
+		id, err := strconv.ParseInt(trackedChatIDStr, 10, 64)
+		if err != nil {
+			log.Printf("Failed to parse CHAT_ID: %v, using default value", err)
+		} else {
+			trackedChatID = id
+		}
+	}
+
+	// Load the prompt from prompt.txt file
+	promptBytes, err := os.ReadFile("./prompt.txt") // Path relative to project root
+	if err != nil {
+		// If file not found in current directory, try parent directory
+		promptBytes, err = os.ReadFile("../prompt.txt") // Path from handlers directory
+		if err != nil {
+			// If still not found, try project root
+			promptBytes, err = os.ReadFile("prompt.txt") // Path from project root when running from main
+			if err != nil {
+				log.Printf("Failed to read prompt.txt: %v, using empty prompt", err)
+				promptBytes = []byte("")
+			}
+		}
+	}
+	prompt := string(promptBytes)
+
 	return &MessageHandler{
-		Bot:          bot,
-		MessageStore: NewMessageStorage(),
-		AdminUserID:  adminUserID,
+		Bot:           bot,
+		MessageStore:  NewMessageStorage(),
+		AdminUserID:   adminUserID,
+		TrackedChatID: trackedChatID,
+		AIAnalyzer:    ai.NewOpenRouterConfig(prompt),
 	}
 }
 
@@ -125,6 +159,11 @@ func (h *MessageHandler) Handle(update schemes.UpdateInterface) error {
 		h.MessageStore.AddMessage(msg)
 		log.Printf("Stored message in chat %d, total messages in this chat: %d",
 			msg.Recipient.ChatId, len(h.MessageStore.GetMessageHistory(msg.Recipient.ChatId)))
+
+		// Perform AI analysis if this is the tracked chat
+		if msg.Recipient.ChatId == h.TrackedChatID {
+			go h.analyzeMessageWithAI(msg)
+		}
 	} else {
 		log.Printf("Ignoring message from bot itself")
 	}
@@ -258,4 +297,22 @@ func (h *MessageHandler) sendSimpleResponse(chatID int64, text string) error {
 	return nil
 }
 
+// analyzeMessageWithAI performs AI analysis on a message if it's from the tracked chat
+func (h *MessageHandler) analyzeMessageWithAI(msg schemes.Message) {
+	if h.AIAnalyzer == nil {
+		log.Printf("AI analyzer not initialized, skipping analysis for message: %s", msg.Body.Text)
+		return
+	}
 
+	log.Printf("Analyzing message with AI: %s", msg.Body.Text)
+	analysis, err := h.AIAnalyzer.AnalyzeMessage(msg.Body.Text)
+	if err != nil {
+		log.Printf("Error analyzing message with AI: %v", err)
+		return
+	}
+
+	log.Printf("AI Analysis result: %+v", analysis)
+
+	// Optionally, you could send the analysis result to a specific chat or log it
+	// For now, we're just logging the result
+}
