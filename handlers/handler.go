@@ -334,36 +334,41 @@ func (h *MessageHandler) analyzeMessageWithAI(msg schemes.Message) {
 
 	log.Printf("AI Analysis result: %+v", analysis)
 
-	// Send the analysis result to the admin user's private chat
-	if h.AdminUserID != 0 {
-		// Convert analysis to JSON string for sending
-		analysisJSON, jsonErr := json.Marshal(analysis)
-		if jsonErr != nil {
-			log.Printf("Error marshaling analysis to JSON: %v", jsonErr)
-			return
-		}
-
-		// Determine the admin's chat ID to send the message to
-		adminChatID := h.AdminChatID
-
-		// Determine if this is a group chat by checking the recipient type
-		isGroupChat := msg.Recipient.ChatType != schemes.DIALOG
-
-		// If we don't have the admin's chat ID yet, try to use the current message's chat if it's from the admin in a private chat
-		if adminChatID == 0 && msg.Sender.UserId == h.AdminUserID && !isGroupChat {
-			adminChatID = msg.Recipient.ChatId
-		}
-
-		// Only send if we have a valid chat ID
-		if adminChatID != 0 {
-			err = h.Bot.SendMessage(adminChatID, fmt.Sprintf("AI Analysis Result:\n%s", string(analysisJSON)))
-			if err != nil {
-				log.Printf("Error sending AI analysis to admin's chat %d: %v", adminChatID, err)
-			} else {
-				log.Printf("Successfully sent AI analysis to admin's chat %d", adminChatID)
+	// Only send to admin if the message is valid (contains absence information)
+	if analysis.IsValid {
+		// Send the analysis result to the admin user's private chat
+		if h.AdminUserID != 0 {
+			// Convert analysis to JSON string for sending
+			analysisJSON, jsonErr := json.Marshal(analysis)
+			if jsonErr != nil {
+				log.Printf("Error marshaling analysis to JSON: %v", jsonErr)
+				return
 			}
-		} else {
-			log.Printf("Cannot send AI analysis to admin: admin chat ID not available")
+
+			// Determine if this is a group chat by checking the recipient type
+			isGroupChat := msg.Recipient.ChatType != schemes.DIALOG
+
+			// Determine the admin's chat ID to send the message to
+			adminChatID := h.AdminChatID
+
+			// If we don't have the admin's chat ID yet, try to use the current message's chat if it's from the admin in a private chat
+			if adminChatID == 0 && msg.Sender.UserId == h.AdminUserID && !isGroupChat {
+				adminChatID = msg.Recipient.ChatId
+			}
+
+			// Only send if we have a valid chat ID
+			if adminChatID != 0 {
+				err = h.Bot.SendMessage(adminChatID, fmt.Sprintf("AI Analysis Result:\n%s", string(analysisJSON)))
+				if err != nil {
+					log.Printf("Error sending AI analysis to admin's chat %d: %v", adminChatID, err)
+				} else {
+					log.Printf("Successfully sent AI analysis to admin's chat %d", adminChatID)
+				}
+			} else {
+				log.Printf("Cannot send AI analysis to admin: admin chat ID not available")
+			}
 		}
+	} else {
+		log.Printf("Message is not valid for absence tracking, not sending to admin")
 	}
 }
