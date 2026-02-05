@@ -114,20 +114,31 @@ func NewMessageHandler(bot *bot.BotClient, adminUserID int64) *MessageHandler {
 		}
 	}
 
-	// Load the prompt from prompt.txt file
-	promptBytes, err := os.ReadFile("./prompt.txt") // Path relative to project root
-	if err != nil {
-		// If file not found in current directory, try parent directory
-		promptBytes, err = os.ReadFile("../prompt.txt") // Path from handlers directory
-		if err != nil {
-			// If still not found, try project root
-			promptBytes, err = os.ReadFile("prompt.txt") // Path from project root when running from main
-			if err != nil {
-				log.Printf("Failed to read prompt.txt: %v, using empty prompt", err)
-				promptBytes = []byte("")
-			}
+	// Load the prompt from prompt.txt file using multiple possible paths
+	var promptBytes []byte
+	var err error
+
+	// Try different possible paths where prompt.txt might be located
+	pathsToTry := []string{
+		"../prompt.txt",      // From handlers directory when running from main
+		"../../prompt.txt",   // From handlers directory when running from deeper path
+		"./prompt.txt",       // Current directory
+		"prompt.txt",         // Project root when running from project root
+	}
+
+	for _, path := range pathsToTry {
+		promptBytes, err = os.ReadFile(path)
+		if err == nil {
+			log.Printf("Successfully loaded prompt.txt from: %s", path)
+			break
 		}
 	}
+
+	if err != nil {
+		log.Printf("Failed to read prompt.txt from any path: %v, using empty prompt", err)
+		promptBytes = []byte("")
+	}
+
 	prompt := string(promptBytes)
 
 	return &MessageHandler{
