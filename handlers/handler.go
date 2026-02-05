@@ -1,6 +1,7 @@
 package handlers
 
 import (
+	"encoding/json"
 	"fmt"
 	"log"
 	"os"
@@ -324,6 +325,21 @@ func (h *MessageHandler) analyzeMessageWithAI(msg schemes.Message) {
 
 	log.Printf("AI Analysis result: %+v", analysis)
 
-	// Optionally, you could send the analysis result to a specific chat or log it
-	// For now, we're just logging the result
+	// Send the analysis result to the admin user
+	if h.AdminUserID != 0 {
+		// Convert analysis to JSON string for sending
+		analysisJSON, jsonErr := json.Marshal(analysis)
+		if jsonErr != nil {
+			log.Printf("Error marshaling analysis to JSON: %v", jsonErr)
+			return
+		}
+
+		// Send the JSON result to the admin user
+		err = h.Bot.SendMessage(h.AdminUserID, fmt.Sprintf("AI Analysis Result:\n%s", string(analysisJSON)))
+		if err != nil {
+			log.Printf("Error sending AI analysis to admin user %d: %v", h.AdminUserID, err)
+		} else {
+			log.Printf("Successfully sent AI analysis to admin user %d", h.AdminUserID)
+		}
+	}
 }
