@@ -98,6 +98,7 @@ type MessageHandler struct {
 	Bot            *bot.BotClient
 	MessageStore   *MessageStorage
 	AdminUserID    int64  // Admin user ID: +79310071775
+	AdminChatID    int64  // Admin's private chat ID (set when admin interacts with bot)
 	TrackedChatID  int64  // ID of the chat to track for AI analysis
 	AIAnalyzer     *ai.OpenRouterConfig
 }
@@ -146,6 +147,7 @@ func NewMessageHandler(bot *bot.BotClient, adminUserID int64) *MessageHandler {
 		Bot:           bot,
 		MessageStore:  NewMessageStorage(),
 		AdminUserID:   adminUserID,
+		AdminChatID:   0, // Will be set when admin interacts with the bot
 		TrackedChatID: trackedChatID,
 		AIAnalyzer:    ai.NewOpenRouterConfig(prompt),
 	}
@@ -195,6 +197,13 @@ func (h *MessageHandler) Handle(update schemes.UpdateInterface) error {
 	// Handle private messages
 	if !isGroupChat {
 		log.Printf("Processing private message for user %d", msg.Sender.UserId)
+
+		// If this is the admin, update their chat ID for future notifications
+		if msg.Sender.UserId == h.AdminUserID {
+			h.AdminChatID = msg.Recipient.ChatId
+			log.Printf("Updated admin chat ID to %d", h.AdminChatID)
+		}
+
 		return h.handlePrivateMessage(msg)
 	}
 
@@ -325,7 +334,7 @@ func (h *MessageHandler) analyzeMessageWithAI(msg schemes.Message) {
 
 	log.Printf("AI Analysis result: %+v", analysis)
 
-	// Send the analysis result to the admin user
+	// Send the analysis result to the admin user's private chat
 	if h.AdminUserID != 0 {
 		// Convert analysis to JSON string for sending
 		analysisJSON, jsonErr := json.Marshal(analysis)
@@ -334,12 +343,27 @@ func (h *MessageHandler) analyzeMessageWithAI(msg schemes.Message) {
 			return
 		}
 
-		// Send the JSON result to the admin user
-		err = h.Bot.SendMessage(h.AdminUserID, fmt.Sprintf("AI Analysis Result:\n%s", string(analysisJSON)))
-		if err != nil {
-			log.Printf("Error sending AI analysis to admin user %d: %v", h.AdminUserID, err)
+		// Determine the admin's chat ID to send the message to
+		adminChatID := h.AdminChatID
+
+		// Determine if this is a group chat by checking the recipient type
+		isGroupChat := msg.Recipient.ChatType != schemes.DIALOG
+
+		// If we don't have the admin's chat ID yet, try to use the current message's chat if it's from the admin in a private chat
+		if adminChatID == 0 && msg.Sender.UserId == h.AdminUserID && !isGroupChat {
+			adminChatID = msg.Recipient.ChatId
+		}
+
+		// Only send if we have a valid chat ID
+		if adminChatID != 0 {
+			err = h.Bot.SendMessage(adminChatID, fmt.Sprintf("AI Analysis Result:\n%s", string(analysisJSON)))
+			if err != nil {
+				log.Printf("Error sending AI analysis to admin's chat %d: %v", adminChatID, err)
+			} else {
+				log.Printf("Successfully sent AI analysis to admin's chat %d", adminChatID)
+			}
 		} else {
-			log.Printf("Successfully sent AI analysis to admin user %d", h.AdminUserID)
+			log.Printf("Cannot send AI analysis to admin: admin chat ID not available")
 		}
 	}
 }
