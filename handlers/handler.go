@@ -1,7 +1,6 @@
 package handlers
 
 import (
-	"encoding/json"
 	"fmt"
 	"log"
 	"os"
@@ -349,23 +348,43 @@ func (h *MessageHandler) analyzeMessageWithAI(msg schemes.Message) {
 	if analysis.IsValid {
 		// Send the analysis result to the admin user's private chat
 		if h.AdminUserID != 0 {
-			// Convert analysis to JSON string for sending
-			analysisJSON, jsonErr := json.Marshal(analysis)
-			if jsonErr != nil {
-				log.Printf("Error marshaling analysis to JSON: %v", jsonErr)
-				return
-			}
-
 			// Use the admin's chat ID from environment variable or previously set value
 			adminChatID := h.AdminChatID
 
+			// Format the analysis result in a readable way with emojis
+			formattedMessage := fmt.Sprintf(
+				"📋 *НОВАЯ ЗАПИСЬ*\n\n"+
+				"🏥 **Тип**: %s\n"+
+				"📊 **Статус**: %s\n"+
+				"🏢 **Подразделение**: \n"+  // Will be filled based on position if needed
+				"💼 **Должность**: %s\n"+
+				"👤 **ФИО**: %s\n"+
+				"📅 **Дата начала**: %s\n"+
+				"🔚 **Дата окончания**: %s\n"+
+				"💬 **Оригинальное сообщение**: \"%s\" (цитируемое)\n\n"+
+				"❓ Внести изменения на сайт?\n"+
+				"✅ *Да* / ❌ *Нет*",
+				analysis.AbsenceType,
+				analysis.Status,
+				analysis.Employee.Position,
+				analysis.Employee.FullName,
+				analysis.Dates.StartDate,
+				func() string {
+					if analysis.Dates.EndDate == "" {
+						return "⏳"
+					}
+					return analysis.Dates.EndDate
+				}(),
+				analysis.OriginalMessage,
+			)
+
 			// Only send if we have a valid chat ID
 			if adminChatID != 0 {
-				err = h.Bot.SendMessage(adminChatID, fmt.Sprintf("AI Analysis Result:\n%s", string(analysisJSON)))
+				err = h.Bot.SendMessage(adminChatID, formattedMessage)
 				if err != nil {
-					log.Printf("Error sending AI analysis to admin's chat %d: %v", adminChatID, err)
+					log.Printf("Error sending formatted AI analysis to admin's chat %d: %v", adminChatID, err)
 				} else {
-					log.Printf("Successfully sent AI analysis to admin's chat %d", adminChatID)
+					log.Printf("Successfully sent formatted AI analysis to admin's chat %d", adminChatID)
 				}
 			} else {
 				log.Printf("Cannot send AI analysis to admin: ADMIN_CHAT_ID not set in environment variables")
