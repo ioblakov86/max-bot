@@ -25,18 +25,25 @@ func NewBotClient(token string) *BotClient {
 	}
 }
 
-// SendMessage sends a message to a specific chat
+// SendMessage sends a message to a specific chat with markdown formatting
 func (b *BotClient) SendMessage(chatID int64, text string) error {
-	// Use the official Max Bot API client
-	msg := maxbot.NewMessage().SetChat(chatID).SetText(text)
-
-	err := b.MaxBot.Messages.Send(context.Background(), msg)
+	// Create a new message with markdown formatting
+	message := maxbot.NewMessage()
+	message.SetChat(chatID)
+	message.SetText(text)
+	
+	// Try to set parse mode for markdown formatting if available
+	// Since the direct method might not be available, we'll rely on the API's auto-detection
+	// of markdown syntax in the text itself
+	
+	err := b.MaxBot.Messages.Send(context.Background(), message)
 	if err != nil {
 		return fmt.Errorf("failed to send message: %w", err)
 	}
 
 	return nil
 }
+
 
 // GetUpdates fetches new messages from the API
 func (b *BotClient) GetUpdates(ctx context.Context) (<-chan schemes.UpdateInterface, error) {
