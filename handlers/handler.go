@@ -351,9 +351,9 @@ func (h *MessageHandler) analyzeMessageWithAI(msg schemes.Message) {
 			// Use the admin's chat ID from environment variable or previously set value
 			adminChatID := h.AdminChatID
 
-			// Format the analysis result in a readable way with emojis
+			// Format the analysis result in a readable way with markdown and emojis
 			formattedMessage := fmt.Sprintf(
-				"📋 *НОВАЯ ЗАПИСЬ*\n\n"+
+				"📋 **НОВАЯ ЗАПИСЬ**\n\n"+
 				"🏥 **Тип**: %s\n"+
 				"📊 **Статус**: %s\n"+
 				"🏢 **Подразделение**: \n"+  // Will be filled based on position if needed
@@ -361,9 +361,9 @@ func (h *MessageHandler) analyzeMessageWithAI(msg schemes.Message) {
 				"👤 **ФИО**: %s\n"+
 				"📅 **Дата начала**: %s\n"+
 				"🔚 **Дата окончания**: %s\n"+
-				"💬 **Оригинальное сообщение**: \"%s\" (цитируемое)\n\n"+
-				"❓ Внести изменения на сайт?\n"+
-				"✅ *Да* / ❌ *Нет*",
+				"💬 **Оригинальное сообщение**: \n> %s\n\n"+
+				"❓ **Внести изменения на сайт?**\n"+
+				"✅ **Да** / ❌ **Нет**",
 				analysis.AbsenceType,
 				analysis.Status,
 				analysis.Employee.Position,
