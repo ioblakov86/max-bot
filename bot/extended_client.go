@@ -48,7 +48,7 @@ type MessageWithKeyboard struct {
 }
 
 // SendMessageWithKeyboard sends a message with inline keyboard buttons using the correct Max Messenger API format
-func (b *BotClient) SendMessageWithKeyboard(chatID int64, text string, buttons [][]InlineKeyboardButton) error {
+func (b *BotClient) SendMessageWithKeyboard(chatID int64, text string, buttons [][]InlineKeyboardButton) (string, error) {
 	// Convert our button format to Max Messenger API format
 	var keyboardButtons [][]KeyboardButton
 	for _, row := range buttons {
@@ -86,13 +86,13 @@ func (b *BotClient) SendMessageWithKeyboard(chatID int64, text string, buttons [
 	// Convert to JSON
 	payload, err := json.Marshal(message)
 	if err != nil {
-		return fmt.Errorf("failed to marshal message: %w", err)
+		return "", fmt.Errorf("failed to marshal message: %w", err)
 	}
 
 	// Get the bot token from environment
 	token := os.Getenv("MAX_BOT_TOKEN")
 	if token == "" {
-		return fmt.Errorf("MAX_BOT_TOKEN environment variable is required")
+		return "", fmt.Errorf("MAX_BOT_TOKEN environment variable is required")
 	}
 
 	// Create the API endpoint URL with chat_id as query parameter
@@ -104,7 +104,7 @@ func (b *BotClient) SendMessageWithKeyboard(chatID int64, text string, buttons [
 	// Create HTTP request
 	req, err := http.NewRequest("POST", fullURL, bytes.NewBuffer(payload))
 	if err != nil {
-		return fmt.Errorf("failed to create request: %w", err)
+		return "", fmt.Errorf("failed to create request: %w", err)
 	}
 
 	// Set headers according to Max Messenger API documentation
@@ -115,7 +115,79 @@ func (b *BotClient) SendMessageWithKeyboard(chatID int64, text string, buttons [
 	client := &http.Client{}
 	resp, err := client.Do(req)
 	if err != nil {
-		return fmt.Errorf("failed to send request: %w", err)
+		return "", fmt.Errorf("failed to send request: %w", err)
+	}
+	defer resp.Body.Close()
+
+	// Read response
+	responseBody, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return "", fmt.Errorf("failed to read response: %w", err)
+	}
+
+	// Check if the request was successful
+	if resp.StatusCode != http.StatusOK {
+		return "", fmt.Errorf("API request failed with status %d: %s", resp.StatusCode, string(responseBody))
+	}
+
+	// Parse response to get message ID
+	var result struct {
+		Message struct {
+			ID string `json:"id"`
+		} `json:"message"`
+	}
+	if err := json.Unmarshal(responseBody, &result); err != nil {
+		return "", fmt.Errorf("failed to parse response: %w", err)
+	}
+
+	return result.Message.ID, nil
+}
+
+// AnswerCallback sends an answer to a callback query
+func (b *BotClient) AnswerCallback(callbackID string, text string, removeKeyboard bool) error {
+	// Create the callback answer payload
+	callbackAnswer := map[string]interface{}{
+		"callback_id": callbackID,
+	}
+	
+	// If we want to remove keyboard, we need to send message with empty attachments
+	if removeKeyboard {
+		callbackAnswer["message"] = map[string]interface{}{
+			"text":        text,
+			"attachments": []interface{}{}, // Empty array to remove keyboard
+		}
+	}
+
+	// Convert to JSON
+	payload, err := json.Marshal(callbackAnswer)
+	if err != nil {
+		return fmt.Errorf("failed to marshal callback answer: %w", err)
+	}
+
+	// Get the bot token from environment
+	token := os.Getenv("MAX_BOT_TOKEN")
+	if token == "" {
+		return fmt.Errorf("MAX_BOT_TOKEN environment variable is required")
+	}
+
+	// Create the API endpoint URL
+	url := "https://platform-api.max.ru/messages/callback"
+
+	// Create HTTP request
+	req, err := http.NewRequest("POST", url, bytes.NewBuffer(payload))
+	if err != nil {
+		return fmt.Errorf("failed to create request: %w", err)
+	}
+
+	// Set headers
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Authorization", token)
+
+	// Send the request
+	client := &http.Client{}
+	resp, err := client.Do(req)
+	if err != nil {
+		return fmt.Errorf("failed to send callback answer: %w", err)
 	}
 	defer resp.Body.Close()
 
@@ -127,7 +199,64 @@ func (b *BotClient) SendMessageWithKeyboard(chatID int64, text string, buttons [
 
 	// Check if the request was successful
 	if resp.StatusCode != http.StatusOK {
-		return fmt.Errorf("API request failed with status %d: %s", resp.StatusCode, string(responseBody))
+		return fmt.Errorf("callback answer request failed with status %d: %s", resp.StatusCode, string(responseBody))
+	}
+
+	return nil
+}
+
+// EditMessage removes keyboard from a message by editing it
+func (b *BotClient) EditMessageRemoveKeyboard(chatID int64, messageID string, text string) error {
+	// Create the message payload without attachments (no keyboard)
+	message := map[string]interface{}{
+		"text": text,
+	}
+
+	// Convert to JSON
+	payload, err := json.Marshal(message)
+	if err != nil {
+		return fmt.Errorf("failed to marshal message: %w", err)
+	}
+
+	// Get the bot token from environment
+	token := os.Getenv("MAX_BOT_TOKEN")
+	if token == "" {
+		return fmt.Errorf("MAX_BOT_TOKEN environment variable is required")
+	}
+
+	// Create the API endpoint URL with chat_id as query parameter
+	baseURL := fmt.Sprintf("https://platform-api.max.ru/messages/%s", messageID)
+	params := url.Values{}
+	params.Set("chat_id", fmt.Sprintf("%d", chatID))
+	fullURL := fmt.Sprintf("%s?%s", baseURL, params.Encode())
+
+	// Create HTTP request
+	req, err := http.NewRequest("PUT", fullURL, bytes.NewBuffer(payload))
+	if err != nil {
+		return fmt.Errorf("failed to create request: %w", err)
+	}
+
+	// Set headers
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Authorization", token)
+
+	// Send the request
+	client := &http.Client{}
+	resp, err := client.Do(req)
+	if err != nil {
+		return fmt.Errorf("failed to edit message: %w", err)
+	}
+	defer resp.Body.Close()
+
+	// Read response
+	responseBody, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return fmt.Errorf("failed to read response: %w", err)
+	}
+
+	// Check if the request was successful
+	if resp.StatusCode != http.StatusOK {
+		return fmt.Errorf("edit message request failed with status %d: %s", resp.StatusCode, string(responseBody))
 	}
 
 	return nil
