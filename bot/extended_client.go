@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"net/url"
 	"os"
 )
 
@@ -21,28 +22,65 @@ type InlineKeyboardMarkup struct {
 	InlineKeyboard [][]InlineKeyboardButton `json:"inline_keyboard"`
 }
 
-// MessageWithKeyboard represents the message structure for API requests with keyboard
-type MessageWithKeyboard struct {
-	ChatID      int64               `json:"chat_id"`
-	Text        string              `json:"text"`
-	ParseMode   string              `json:"parse_mode,omitempty"`
-	ReplyMarkup *InlineKeyboardMarkup `json:"reply_markup,omitempty"`
+// Attachment represents an attachment in Max Messenger API
+type Attachment struct {
+	Type    string          `json:"type"`
+	Payload KeyboardPayload `json:"payload"`
 }
 
-// SendMessageWithKeyboard sends a message with inline keyboard buttons using the correct Max Messenger API
+// KeyboardPayload represents the payload for inline keyboard
+type KeyboardPayload struct {
+	Buttons [][]KeyboardButton `json:"buttons"`
+}
+
+// KeyboardButton represents a button in Max Messenger API
+type KeyboardButton struct {
+	Type    string `json:"type"` // "callback" or "link"
+	Text    string `json:"text"`
+	Payload string `json:"payload,omitempty"` // for callback buttons
+	URL     string `json:"url,omitempty"`     // for link buttons
+}
+
+// MessageWithKeyboard represents the message structure for API requests with keyboard
+type MessageWithKeyboard struct {
+	Text        string       `json:"text"`
+	Attachments []Attachment `json:"attachments,omitempty"`
+}
+
+// SendMessageWithKeyboard sends a message with inline keyboard buttons using the correct Max Messenger API format
 func (b *BotClient) SendMessageWithKeyboard(chatID int64, text string, buttons [][]InlineKeyboardButton) error {
-	// Create the message payload with keyboard
-	var markup *InlineKeyboardMarkup
-	if len(buttons) > 0 {
-		markup = &InlineKeyboardMarkup{
-			InlineKeyboard: buttons,
+	// Convert our button format to Max Messenger API format
+	var keyboardButtons [][]KeyboardButton
+	for _, row := range buttons {
+		var keyboardRow []KeyboardButton
+		for _, btn := range row {
+			button := KeyboardButton{
+				Text: btn.Text,
+			}
+			if btn.Data != "" {
+				button.Type = "callback"
+				button.Payload = btn.Data
+			}
+			if btn.URL != "" {
+				button.Type = "link"
+				button.URL = btn.URL
+			}
+			keyboardRow = append(keyboardRow, button)
 		}
+		keyboardButtons = append(keyboardButtons, keyboardRow)
 	}
 
+	// Create the message payload with keyboard in attachments
 	message := MessageWithKeyboard{
-		ChatID:      chatID,
-		Text:        text,
-		ReplyMarkup: markup,
+		Text: text,
+		Attachments: []Attachment{
+			{
+				Type: "inline_keyboard",
+				Payload: KeyboardPayload{
+					Buttons: keyboardButtons,
+				},
+			},
+		},
 	}
 
 	// Convert to JSON
@@ -57,12 +95,14 @@ func (b *BotClient) SendMessageWithKeyboard(chatID int64, text string, buttons [
 		return fmt.Errorf("MAX_BOT_TOKEN environment variable is required")
 	}
 
-	// Create the API endpoint URL based on Max Messenger API documentation
-	// Using the correct API endpoint: platform-api.max.ru
-	url := fmt.Sprintf("https://platform-api.max.ru/messages")
+	// Create the API endpoint URL with chat_id as query parameter
+	baseURL := "https://platform-api.max.ru/messages"
+	params := url.Values{}
+	params.Set("chat_id", fmt.Sprintf("%d", chatID))
+	fullURL := fmt.Sprintf("%s?%s", baseURL, params.Encode())
 
 	// Create HTTP request
-	req, err := http.NewRequest("POST", url, bytes.NewBuffer(payload))
+	req, err := http.NewRequest("POST", fullURL, bytes.NewBuffer(payload))
 	if err != nil {
 		return fmt.Errorf("failed to create request: %w", err)
 	}
