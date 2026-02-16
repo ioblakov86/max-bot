@@ -165,6 +165,12 @@ func NewMessageHandler(bot *bot.BotClient, adminUserID int64) *MessageHandler {
 
 // Handle processes incoming messages and responds accordingly
 func (h *MessageHandler) Handle(update schemes.UpdateInterface) error {
+	// Handle callback queries from inline keyboard buttons
+	if update.GetUpdateType() == schemes.TypeMessageCallback {
+		return h.handleCallbackQuery(update)
+	}
+
+	// Handle regular messages
 	if update.GetUpdateType() != schemes.TypeMessageCreated {
 		return nil
 	}
@@ -220,6 +226,34 @@ func (h *MessageHandler) Handle(update schemes.UpdateInterface) error {
 	log.Printf("Message from group/channel %d processed, no response needed", msg.Recipient.ChatId)
 	// For group chats, just store the message and don't respond (unless mentioned, handled above)
 	return nil
+}
+
+// handleCallbackQuery handles callback queries from inline keyboard buttons
+func (h *MessageHandler) handleCallbackQuery(update schemes.UpdateInterface) error {
+	callbackUpdate, ok := update.(*schemes.MessageCallbackUpdate)
+	if !ok {
+		return fmt.Errorf("could not cast update to MessageCallbackUpdate")
+	}
+
+	payload := callbackUpdate.Callback.Payload
+	chatID := callbackUpdate.Message.Recipient.ChatId
+	userID := callbackUpdate.Callback.User.UserId
+
+	log.Printf("Received callback - UserID: %d, ChatID: %d, Payload: %s", userID, chatID, payload)
+
+	// Handle callback based on payload
+	switch payload {
+	case "accept":
+		log.Printf("User %d accepted the changes", userID)
+		// TODO: Implement website update logic here
+		return h.sendSimpleResponse(chatID, "TODO: обработать правку страницы на сайте")
+	case "cancel":
+		log.Printf("User %d cancelled the action", userID)
+		return h.sendSimpleResponse(chatID, "Действие отменено")
+	default:
+		log.Printf("Unknown callback payload: %s", payload)
+		return nil
+	}
 }
 
 // isBotMentioned checks if the bot is mentioned in the message
