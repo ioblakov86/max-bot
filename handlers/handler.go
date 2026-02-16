@@ -380,11 +380,17 @@ func (h *MessageHandler) analyzeMessageWithAI(msg schemes.Message) {
 
 			// Only send if we have a valid chat ID
 			if adminChatID != 0 {
-				err = h.Bot.SendMessageWithParseMode(adminChatID, formattedMessage, "MarkdownV2")
+				buttons := [][]bot.InlineKeyboardButton{
+					{
+						{Text: "Принять", Data: "accept"},
+						{Text: "Отмена", Data: "cancel"},
+					},
+				}
+				err = h.Bot.SendMessageWithKeyboard(adminChatID, formattedMessage, buttons)
 				if err != nil {
 					log.Printf("Error sending formatted AI analysis to admin's chat %d: %v", adminChatID, err)
 					
-					// Fallback to regular SendMessage if parse mode fails
+					// Fallback to regular SendMessage if keyboard fails
 					fallbackErr := h.Bot.SendMessage(adminChatID, formattedMessage)
 					if fallbackErr != nil {
 						log.Printf("Error sending AI analysis with fallback method: %v", fallbackErr)
