@@ -58,8 +58,8 @@ func (b *BotClient) SendMessageWithKeyboard(chatID int64, text string, buttons [
 	}
 
 	// Create the API endpoint URL based on Max Messenger API documentation
-	// Using the correct API endpoint format
-	url := fmt.Sprintf("https://api.max.ru/bot%s/sendMessage", token)
+	// Using the correct API endpoint: platform-api.max.ru
+	url := fmt.Sprintf("https://platform-api.max.ru/messages")
 
 	// Create HTTP request
 	req, err := http.NewRequest("POST", url, bytes.NewBuffer(payload))
@@ -67,8 +67,9 @@ func (b *BotClient) SendMessageWithKeyboard(chatID int64, text string, buttons [
 		return fmt.Errorf("failed to create request: %w", err)
 	}
 
-	// Set headers
+	// Set headers according to Max Messenger API documentation
 	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Authorization", token)
 
 	// Send the request
 	client := &http.Client{}
