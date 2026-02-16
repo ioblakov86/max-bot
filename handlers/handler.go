@@ -94,14 +94,12 @@ func (ms *MessageStorage) GetAllChats() []int64 {
 
 // MessageHandler handles incoming messages
 type MessageHandler struct {
-	Bot            *bot.BotClient
-	MessageStore   *MessageStorage
-	AdminUserID    int64  // Admin user ID: +79310071775
-	AdminChatID    int64  // Admin's chat ID for notifications (from environment variable)
-	TrackedChatID  int64  // ID of the chat to track for AI analysis
-	AIAnalyzer     *ai.OpenRouterConfig
-	KeyboardMessages map[string]string // Map callback_id -> message_id for messages with keyboards
-	KeyboardMutex    sync.Mutex        // Mutex for thread-safe access to KeyboardMessages
+	Bot           *bot.BotClient
+	MessageStore  *MessageStorage
+	AdminUserID   int64 // Admin user ID: +79310071775
+	AdminChatID   int64 // Admin's chat ID for notifications (from environment variable)
+	TrackedChatID int64 // ID of the chat to track for AI analysis
+	AIAnalyzer    *ai.OpenRouterConfig
 }
 
 // NewMessageHandler creates a new message handler
@@ -156,13 +154,12 @@ func NewMessageHandler(bot *bot.BotClient, adminUserID int64) *MessageHandler {
 	prompt := string(promptBytes)
 
 	return &MessageHandler{
-		Bot:              bot,
-		MessageStore:     NewMessageStorage(),
-		AdminUserID:      adminUserID,
-		AdminChatID:      adminChatID, // Use the chat ID from environment variable
-		TrackedChatID:    trackedChatID,
-		AIAnalyzer:       ai.NewOpenRouterConfig(prompt),
-		KeyboardMessages: make(map[string]string),
+		Bot:           bot,
+		MessageStore:  NewMessageStorage(),
+		AdminUserID:   adminUserID,
+		AdminChatID:   adminChatID, // Use the chat ID from environment variable
+		TrackedChatID: trackedChatID,
+		AIAnalyzer:    ai.NewOpenRouterConfig(prompt),
 	}
 }
 
@@ -241,33 +238,21 @@ func (h *MessageHandler) handleCallbackQuery(update schemes.UpdateInterface) err
 	payload := callbackUpdate.Callback.Payload
 	chatID := callbackUpdate.Message.Recipient.ChatId
 	userID := callbackUpdate.Callback.User.UserId
-	callbackID := callbackUpdate.Callback.CallbackID
-	messageID := callbackUpdate.Message.Body.Mid
 
-	log.Printf("Received callback - UserID: %d, ChatID: %d, CallbackID: %s, MessageID: %s, Payload: %s", userID, chatID, callbackID, messageID, payload)
+	log.Printf("Received callback - UserID: %d, ChatID: %d, Payload: %s", userID, chatID, payload)
 
 	// Handle callback based on payload
 	switch payload {
 	case "accept":
 		log.Printf("User %d accepted the changes", userID)
 		
-		// Edit the message to remove keyboard
-		if err := h.Bot.EditMessageRemoveKeyboard(chatID, messageID, callbackUpdate.Message.Body.Text); err != nil {
-			log.Printf("Error editing message to remove keyboard: %v", err)
-		}
-		
 		// TODO: Implement website update logic here
-		return h.sendSimpleResponse(chatID, "TODO: обработать правку страницы на сайте")
+		return h.sendSimpleResponse(chatID, "✅ Принято! Обработка правки страницы на сайте...")
 		
 	case "cancel":
 		log.Printf("User %d cancelled the action", userID)
 		
-		// Edit the message to remove keyboard
-		if err := h.Bot.EditMessageRemoveKeyboard(chatID, messageID, callbackUpdate.Message.Body.Text); err != nil {
-			log.Printf("Error editing message to remove keyboard: %v", err)
-		}
-		
-		return h.sendSimpleResponse(chatID, "Действие отменено")
+		return h.sendSimpleResponse(chatID, "❌ Действие отменено")
 		
 	default:
 		log.Printf("Unknown callback payload: %s", payload)
@@ -442,19 +427,9 @@ func (h *MessageHandler) analyzeMessageWithAI(msg schemes.Message) {
 				messageID, err := h.Bot.SendMessageWithKeyboard(adminChatID, formattedMessage, buttons)
 				if err != nil {
 					log.Printf("Error sending formatted AI analysis to admin's chat %d: %v", adminChatID, err)
-
-					// Fallback to regular SendMessage if keyboard fails
-					fallbackErr := h.Bot.SendMessage(adminChatID, formattedMessage)
-					if fallbackErr != nil {
-						log.Printf("Error sending AI analysis with fallback method: %v", fallbackErr)
-					} else {
-						log.Printf("Successfully sent formatted AI analysis to admin's chat %d with fallback method", adminChatID)
-					}
+					// Don't use fallback - we want to avoid duplicate messages
 				} else {
 					log.Printf("Successfully sent formatted AI analysis to admin's chat %d with message ID: %s", adminChatID, messageID)
-					// Store message ID for later keyboard removal
-					// Note: We don't have callback_id yet, so we'll store message_id indexed by a placeholder
-					// The actual callback_id will be available when user clicks the button
 				}
 			} else {
 				log.Printf("Cannot send AI analysis to admin: ADMIN_CHAT_ID not set in environment variables")
