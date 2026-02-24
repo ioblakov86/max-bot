@@ -94,12 +94,14 @@ func (ms *MessageStorage) GetAllChats() []int64 {
 
 // MessageHandler handles incoming messages
 type MessageHandler struct {
-	Bot           *bot.BotClient
-	MessageStore  *MessageStorage
-	AdminUserID   int64 // Admin user ID: +79310071775
-	AdminChatID   int64 // Admin's chat ID for notifications (from environment variable)
-	TrackedChatID int64 // ID of the chat to track for AI analysis
-	AIAnalyzer    *ai.OpenRouterConfig
+	Bot              *bot.BotClient
+	MessageStore     *MessageStorage
+	AdminUserID      int64 // Admin user ID: +79310071775
+	AdminChatID      int64 // Admin's chat ID for notifications (from environment variable)
+	TrackedChatID    int64 // ID of the chat to track for AI analysis
+	AIAnalyzer       *ai.OpenRouterConfig
+	ProcessedCallbacks map[string]bool // Track processed callback IDs to prevent double-clicks
+	CallbackMutex    sync.Mutex        // Mutex for thread-safe access to ProcessedCallbacks
 }
 
 // NewMessageHandler creates a new message handler
@@ -154,12 +156,13 @@ func NewMessageHandler(bot *bot.BotClient, adminUserID int64) *MessageHandler {
 	prompt := string(promptBytes)
 
 	return &MessageHandler{
-		Bot:           bot,
-		MessageStore:  NewMessageStorage(),
-		AdminUserID:   adminUserID,
-		AdminChatID:   adminChatID, // Use the chat ID from environment variable
-		TrackedChatID: trackedChatID,
-		AIAnalyzer:    ai.NewOpenRouterConfig(prompt),
+		Bot:              bot,
+		MessageStore:     NewMessageStorage(),
+		AdminUserID:      adminUserID,
+		AdminChatID:      adminChatID,
+		TrackedChatID:    trackedChatID,
+		AIAnalyzer:       ai.NewOpenRouterConfig(prompt),
+		ProcessedCallbacks: make(map[string]bool),
 	}
 }
 
@@ -244,22 +247,34 @@ func (h *MessageHandler) handleCallbackQuery(update schemes.UpdateInterface) err
 	payload := callbackUpdate.Callback.Payload
 	chatID := callbackUpdate.Message.Recipient.ChatId
 	userID := callbackUpdate.Callback.User.UserId
+	callbackID := callbackUpdate.Callback.CallbackID
 
-	log.Printf("Received callback - UserID: %d, ChatID: %d, Payload: %s", userID, chatID, payload)
+	// Check if this callback has already been processed
+	h.CallbackMutex.Lock()
+	if h.ProcessedCallbacks[callbackID] {
+		h.CallbackMutex.Unlock()
+		log.Printf("Callback %s already processed, ignoring duplicate click", callbackID)
+		return nil
+	}
+	// Mark as processed
+	h.ProcessedCallbacks[callbackID] = true
+	h.CallbackMutex.Unlock()
+
+	log.Printf("Received callback - UserID: %d, ChatID: %d, CallbackID: %s, Payload: %s", userID, chatID, callbackID, payload)
 
 	// Handle callback based on payload
 	switch payload {
 	case "accept":
 		log.Printf("User %d accepted the changes", userID)
-		
+
 		// TODO: Implement website update logic here
 		return h.sendSimpleResponse(chatID, "✅ Принято! Обработка правки страницы на сайте...")
-		
+
 	case "cancel":
 		log.Printf("User %d cancelled the action", userID)
-		
+
 		return h.sendSimpleResponse(chatID, "❌ Действие отменено")
-		
+
 	default:
 		log.Printf("Unknown callback payload: %s", payload)
 		return nil
