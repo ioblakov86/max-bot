@@ -374,68 +374,81 @@ func (h *MessageHandler) analyzeMessageWithAI(msg schemes.Message) {
 	}
 
 	log.Printf("Analyzing message with AI: %s", msg.Body.Text)
-	analysis, err := h.AIAnalyzer.AnalyzeMessage(msg.Body.Text)
+	analyses, err := h.AIAnalyzer.AnalyzeMessage(msg.Body.Text)
 	if err != nil {
 		log.Printf("Error analyzing message with AI: %v", err)
 		return
 	}
 
-	log.Printf("AI Analysis result: %+v", analysis)
+	log.Printf("AI Analysis result: %+v", analyses)
 
-	// Only send to admin if the message is valid (contains absence information)
-	if analysis.IsValid {
-		// Send the analysis result to the admin user's private chat
-		if h.AdminUserID != 0 {
-			// Use the admin's chat ID from environment variable or previously set value
-			adminChatID := h.AdminChatID
+	// Process each analysis result (can be multiple employees)
+	for _, analysis := range analyses {
+		// Only send to admin if the message is valid (contains absence information)
+		if analysis.IsValid {
+			// Send the analysis result to the admin user's private chat
+			if h.AdminUserID != 0 {
+				// Use the admin's chat ID from environment variable or previously set value
+				adminChatID := h.AdminChatID
 
-			// Format the analysis result in a readable way with markdown and emojis
-			formattedMessage := fmt.Sprintf(
-				"📋 НОВАЯ ЗАПИСЬ\n\n"+
-				"🏥 Тип: %s\n"+
-				"📊 Статус: %s\n"+
-				"🏢 Подразделение: \n"+  // Will be filled based on position if needed
-				"💼 Должность: %s\n"+
-				"👤 ФИО: %s\n"+
-				"📅 Дата начала: %s\n"+
-				"🔚 Дата окончания: %s\n"+
-				"💬 Оригинальное сообщение: \n> %s\n\n"+
-				"❓ Внести изменения на сайт?\n"+
-				"✅ Да / ❌ Нет",
-				analysis.AbsenceType,
-				analysis.Status,
-				analysis.Employee.Position,
-				analysis.Employee.FullName,
-				analysis.Dates.StartDate,
-				func() string {
-					if analysis.Dates.EndDate == "" {
-						return "⏳"
+				// Format the analysis result in a readable way with markdown and emojis
+				formattedMessage := fmt.Sprintf(
+					"📋 НОВАЯ ЗАПИСЬ\n\n"+
+						"🏥 Тип: %s\n"+
+						"📊 Статус: %s\n"+
+						"🏢 Подразделение: \n"+ // Will be filled based on position if needed
+						"💼 Должность: %s\n"+
+						"👤 ФИО: %s\n"+
+						"📅 Дата начала: %s\n"+
+						"🔚 Дата окончания: %s\n"+
+						"💬 Оригинальное сообщение: \n> %s\n\n"+
+						"❓ Внести изменения на сайт?\n"+
+						"✅ Да / ❌ Нет",
+					analysis.AbsenceType,
+					analysis.Status,
+					analysis.Employee.Position,
+					analysis.Employee.FullName,
+					analysis.Dates.StartDate,
+					func() string {
+						if analysis.Dates.EndDate == "" {
+							return "⏳"
+						}
+						return analysis.Dates.EndDate
+					}(),
+					analysis.OriginalMessage,
+				)
+
+				// Only send if we have a valid chat ID
+				if adminChatID != 0 {
+					buttons := [][]bot.InlineKeyboardButton{
+						{
+							{Text: "Принять", Data: "accept"},
+							{Text: "Отмена", Data: "cancel"},
+						},
 					}
-					return analysis.Dates.EndDate
-				}(),
-				analysis.OriginalMessage,
-			)
-
-			// Only send if we have a valid chat ID
-			if adminChatID != 0 {
-				buttons := [][]bot.InlineKeyboardButton{
-					{
-						{Text: "Принять", Data: "accept"},
-						{Text: "Отмена", Data: "cancel"},
-					},
-				}
-				messageID, err := h.Bot.SendMessageWithKeyboard(adminChatID, formattedMessage, buttons)
-				if err != nil {
-					log.Printf("Error sending formatted AI analysis to admin's chat %d: %v", adminChatID, err)
-					// Don't use fallback - we want to avoid duplicate messages
+					messageID, err := h.Bot.SendMessageWithKeyboard(adminChatID, formattedMessage, buttons)
+					if err != nil {
+						log.Printf("Error sending formatted AI analysis to admin's chat %d: %v", adminChatID, err)
+						// Don't use fallback - we want to avoid duplicate messages
+					} else {
+						log.Printf("Successfully sent formatted AI analysis to admin's chat %d with message ID: %s for employee: %s", adminChatID, messageID, analysis.Employee.FullName)
+					}
 				} else {
-					log.Printf("Successfully sent formatted AI analysis to admin's chat %d with message ID: %s", adminChatID, messageID)
+					log.Printf("Cannot send AI analysis to admin: ADMIN_CHAT_ID not set in environment variables")
 				}
-			} else {
-				log.Printf("Cannot send AI analysis to admin: ADMIN_CHAT_ID not set in environment variables")
 			}
 		}
-	} else {
+	}
+
+	// Check if all analyses were invalid
+	allInvalid := true
+	for _, analysis := range analyses {
+		if analysis.IsValid {
+			allInvalid = false
+			break
+		}
+	}
+	if allInvalid && len(analyses) > 0 {
 		log.Printf("Message is not valid for absence tracking, not sending to admin")
 	}
 }

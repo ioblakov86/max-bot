@@ -82,17 +82,20 @@ func getFreeModel() string {
 	if model != "" {
 		return model
 	}
-	
+
 	// Default to one of the free models
 	return "arcee-ai/trinity-large-preview:free"
 }
 
 // AnalyzeMessage sends a message to OpenRouter API for analysis
-func (c *OpenRouterConfig) AnalyzeMessage(messageText string) (*MessageAnalysis, error) {
+// Returns an array of MessageAnalysis (can contain multiple employees)
+func (c *OpenRouterConfig) AnalyzeMessage(messageText string) ([]MessageAnalysis, error) {
 	if c.APIKey == "" {
-		return &MessageAnalysis{
-			OriginalMessage: messageText,
-			IsValid:         false,
+		return []MessageAnalysis{
+			{
+				OriginalMessage: messageText,
+				IsValid:         false,
+			},
 		}, fmt.Errorf("OPENROUTER_API_KEY is not set in environment variables")
 	}
 
@@ -158,25 +161,27 @@ func (c *OpenRouterConfig) AnalyzeMessage(messageText string) (*MessageAnalysis,
 
 	content := openRouterResp.Choices[0].Message.Content
 
-	// Find the JSON object in the response (it should be between curly braces)
-	startIdx := strings.Index(content, "{")
-	endIdx := strings.LastIndex(content, "}")
-	
+	// Find the JSON array in the response (it should be between square brackets)
+	startIdx := strings.Index(content, "[")
+	endIdx := strings.LastIndex(content, "]")
+
 	if startIdx == -1 || endIdx == -1 || startIdx >= endIdx {
-		return nil, fmt.Errorf("no valid JSON object found in response: %s", content)
+		return nil, fmt.Errorf("no valid JSON array found in response: %s", content)
 	}
-	
+
 	jsonStr := content[startIdx : endIdx+1]
 
-	// Parse the JSON response into MessageAnalysis struct
-	var analysis MessageAnalysis
-	err = json.Unmarshal([]byte(jsonStr), &analysis)
+	// Parse the JSON response into array of MessageAnalysis
+	var analyses []MessageAnalysis
+	err = json.Unmarshal([]byte(jsonStr), &analyses)
 	if err != nil {
-		return nil, fmt.Errorf("error unmarshaling analysis result: %w", err)
+		return nil, fmt.Errorf("error unmarshaling analysis results: %w", err)
 	}
 
-	// Ensure the original message is preserved
-	analysis.OriginalMessage = messageText
+	// Ensure the original message is preserved in each analysis
+	for i := range analyses {
+		analyses[i].OriginalMessage = messageText
+	}
 
-	return &analysis, nil
+	return analyses, nil
 }
