@@ -131,25 +131,20 @@ func (b *BotClient) SendMessageWithKeyboard(chatID int64, text string, buttons [
 	}
 
 	// Parse response to get message ID
+	// API returns: {"message": {"body": {"mid": "mid.xxx", ...}, ...}, ...}
 	var result map[string]interface{}
 	if err := json.Unmarshal(responseBody, &result); err != nil {
 		return "", fmt.Errorf("failed to parse response: %w", err)
 	}
 
-	// Try to get message ID from different possible locations
+	// Try to get message ID from message.body.mid
 	if message, ok := result["message"].(map[string]interface{}); ok {
-		if id, ok := message["id"].(string); ok {
-			return id, nil
-		}
-		if id, ok := message["message_id"].(string); ok {
-			return id, nil
+		if body, ok := message["body"].(map[string]interface{}); ok {
+			if id, ok := body["mid"].(string); ok {
+				return id, nil
+			}
 		}
 	}
-	
-	// Try top-level id
-	if id, ok := result["id"].(string); ok {
-		return id, nil
-	}
-	
+
 	return "", fmt.Errorf("message ID not found in response: %s", string(responseBody))
 }

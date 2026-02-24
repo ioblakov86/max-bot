@@ -228,6 +228,12 @@ func (h *MessageHandler) Handle(update schemes.UpdateInterface) error {
 	return nil
 }
 
+// isEmptyMessage checks if the message is empty or contains only whitespace
+func (h *MessageHandler) isEmptyMessage(text string) bool {
+	trimmed := strings.TrimSpace(text)
+	return len(trimmed) == 0
+}
+
 // handleCallbackQuery handles callback queries from inline keyboard buttons
 func (h *MessageHandler) handleCallbackQuery(update schemes.UpdateInterface) error {
 	callbackUpdate, ok := update.(*schemes.MessageCallbackUpdate)
@@ -370,6 +376,12 @@ func (h *MessageHandler) sendSimpleResponse(chatID int64, text string) error {
 func (h *MessageHandler) analyzeMessageWithAI(msg schemes.Message) {
 	if h.AIAnalyzer == nil {
 		log.Printf("AI analyzer not initialized, skipping analysis for message: %s", msg.Body.Text)
+		return
+	}
+
+	// Skip empty messages
+	if h.isEmptyMessage(msg.Body.Text) {
+		log.Printf("Skipping empty message analysis for chat %d", msg.Recipient.ChatId)
 		return
 	}
 
