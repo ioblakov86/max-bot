@@ -11,6 +11,7 @@ import (
 
 	"max-bot/ai"
 	"max-bot/bot"
+	"max-bot/storage"
 	schemes "github.com/max-messenger/max-bot-api-client-go/schemes"
 )
 
@@ -100,8 +101,7 @@ type MessageHandler struct {
 	AdminChatID      int64 // Admin's chat ID for notifications (from environment variable)
 	TrackedChatID    int64 // ID of the chat to track for AI analysis
 	AIAnalyzer       *ai.OpenRouterConfig
-	ProcessedCallbacks map[string]bool // Track processed callback IDs to prevent double-clicks
-	CallbackMutex    sync.Mutex        // Mutex for thread-safe access to ProcessedCallbacks
+	CallbackStorage  *storage.CallbackStorage // Persistent storage for callback results
 }
 
 // NewMessageHandler creates a new message handler
@@ -155,14 +155,20 @@ func NewMessageHandler(bot *bot.BotClient, adminUserID int64) *MessageHandler {
 
 	prompt := string(promptBytes)
 
+	// Initialize callback storage
+	callbackStorage, err := storage.NewCallbackStorage("callbacks.json")
+	if err != nil {
+		log.Printf("Warning: Failed to initialize callback storage: %v", err)
+	}
+
 	return &MessageHandler{
-		Bot:              bot,
-		MessageStore:     NewMessageStorage(),
-		AdminUserID:      adminUserID,
-		AdminChatID:      adminChatID,
-		TrackedChatID:    trackedChatID,
-		AIAnalyzer:       ai.NewOpenRouterConfig(prompt),
-		ProcessedCallbacks: make(map[string]bool),
+		Bot:             bot,
+		MessageStore:    NewMessageStorage(),
+		AdminUserID:     adminUserID,
+		AdminChatID:     adminChatID,
+		TrackedChatID:   trackedChatID,
+		AIAnalyzer:      ai.NewOpenRouterConfig(prompt),
+		CallbackStorage: callbackStorage,
 	}
 }
 
@@ -249,29 +255,64 @@ func (h *MessageHandler) handleCallbackQuery(update schemes.UpdateInterface) err
 	userID := callbackUpdate.Callback.User.UserId
 	callbackID := callbackUpdate.Callback.CallbackID
 
-	// Check if this callback has already been processed
-	h.CallbackMutex.Lock()
-	if h.ProcessedCallbacks[callbackID] {
-		h.CallbackMutex.Unlock()
-		log.Printf("Callback %s already processed, ignoring duplicate click", callbackID)
-		return nil
-	}
-	// Mark as processed
-	h.ProcessedCallbacks[callbackID] = true
-	h.CallbackMutex.Unlock()
-
 	log.Printf("Received callback - UserID: %d, ChatID: %d, CallbackID: %s, Payload: %s", userID, chatID, callbackID, payload)
+
+	// Check if this callback has already been processed
+	if h.CallbackStorage != nil && h.CallbackStorage.Exists(callbackID) {
+		result, _ := h.CallbackStorage.GetResult(callbackID)
+		
+		// Send message informing that this callback was already processed
+		var responseText string
+		if result.Payload == "accept" {
+			responseText = "ℹ️ Этот ответ уже был обработан: ✅ Принято! Обработка правки страницы на сайте..."
+		} else {
+			responseText = "ℹ️ Этот ответ уже был обработан: ❌ Действие отменено"
+		}
+		
+		log.Printf("Callback %s already processed with payload '%s', informing user", callbackID, result.Payload)
+		return h.sendSimpleResponse(chatID, responseText)
+	}
 
 	// Handle callback based on payload
 	switch payload {
 	case "accept":
 		log.Printf("User %d accepted the changes", userID)
 
+		// Save the result to storage
+		if h.CallbackStorage != nil {
+			result := storage.CallbackResult{
+				CallbackID:  callbackID,
+				UserID:      userID,
+				ChatID:      chatID,
+				Payload:     payload,
+				MessageText: callbackUpdate.Message.Body.Text,
+				ProcessedAt: time.Now(),
+			}
+			if err := h.CallbackStorage.AddResult(result); err != nil {
+				log.Printf("Error saving callback result: %v", err)
+			}
+		}
+
 		// TODO: Implement website update logic here
 		return h.sendSimpleResponse(chatID, "✅ Принято! Обработка правки страницы на сайте...")
 
 	case "cancel":
 		log.Printf("User %d cancelled the action", userID)
+
+		// Save the result to storage
+		if h.CallbackStorage != nil {
+			result := storage.CallbackResult{
+				CallbackID:  callbackID,
+				UserID:      userID,
+				ChatID:      chatID,
+				Payload:     payload,
+				MessageText: callbackUpdate.Message.Body.Text,
+				ProcessedAt: time.Now(),
+			}
+			if err := h.CallbackStorage.AddResult(result); err != nil {
+				log.Printf("Error saving callback result: %v", err)
+			}
+		}
 
 		return h.sendSimpleResponse(chatID, "❌ Действие отменено")
 
@@ -314,7 +355,7 @@ func (h *MessageHandler) handleAdminCommands(msg schemes.Message) error {
 
 	switch {
 	case text == "/help":
-		helpText := "Доступные команды администратора:\n- /help: Показать это справку\n- /echo [text]: Повторить за вами текст\n- /last: Последние сохраненные сообщения из текущего чата\n- /stat: Статистика сохраненных сообщений с группировкой по чатам"
+		helpText := "Доступные команды администратора:\n- /help: Показать это справку\n- /echo [text]: Повторить за вами текст\n- /last: Последние сохраненные сообщения из текущего чата\n- /stat: Статистика сохраненных сообщений с группировкой по чатам\n- /cstat: Статистика обработанных кнопок (принято/отменено)"
 		return h.sendSimpleResponse(msg.Recipient.ChatId, helpText)
 	case strings.HasPrefix(text, "/echo"):
 		responseText := strings.TrimPrefix(text, "/echo")
@@ -347,6 +388,18 @@ func (h *MessageHandler) handleAdminCommands(msg schemes.Message) error {
 			history := h.MessageStore.GetMessageHistory(chatID)
 			responseText += fmt.Sprintf("- Chat %d: %d сообщений\n", chatID, len(history))
 		}
+		return h.sendSimpleResponse(msg.Recipient.ChatId, responseText)
+	case text == "/cstat":
+		if h.CallbackStorage == nil {
+			return h.sendSimpleResponse(msg.Recipient.ChatId, "Хранилище callback не инициализировано.")
+		}
+		total, accepted, cancelled := h.CallbackStorage.GetStats()
+		responseText := fmt.Sprintf("📊 Статистика обработанных кнопок:\n\n"+
+			"Всего обработано: %d\n"+
+			"✅ Принято: %d\n"+
+			"❌ Отменено: %d\n"+
+			"🕒 Последнее обновление: %s",
+			total, accepted, cancelled, time.Now().Format("02.01.2006 15:04"))
 		return h.sendSimpleResponse(msg.Recipient.ChatId, responseText)
 	default:
 		responseText := fmt.Sprintf("Неизвестная команда. Используйте /help для получения списка команд.")
