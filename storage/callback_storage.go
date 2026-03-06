@@ -6,16 +6,20 @@ import (
 	"os"
 	"sync"
 	"time"
+
+	"max-bot/joomla"
 )
 
 // CallbackResult represents the result of a callback button press
 type CallbackResult struct {
-	CallbackID  string    `json:"callback_id"`
-	UserID      int64     `json:"user_id"`
-	ChatID      int64     `json:"chat_id"`
-	Payload     string    `json:"payload"`
-	MessageText string    `json:"message_text"`
-	ProcessedAt time.Time `json:"processed_at"`
+	CallbackID   string            `json:"callback_id"`
+	UserID       int64             `json:"user_id"`
+	ChatID       int64             `json:"chat_id"`
+	Payload      string            `json:"payload"`
+	MessageText  string            `json:"message_text"`
+	ProcessedAt  time.Time         `json:"processed_at"`
+	Analysis     *joomla.AnalysisResult `json:"analysis,omitempty"`
+	PlannedChanges []joomla.Change `json:"planned_changes,omitempty"`
 }
 
 // CallbackStorage handles persistent storage of callback results

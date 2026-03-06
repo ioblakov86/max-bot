@@ -11,6 +11,7 @@ import (
 
 	"max-bot/ai"
 	"max-bot/bot"
+	"max-bot/joomla"
 	"max-bot/storage"
 	schemes "github.com/max-messenger/max-bot-api-client-go/schemes"
 )
@@ -102,6 +103,7 @@ type MessageHandler struct {
 	TrackedChatID    int64 // ID of the chat to track for AI analysis
 	AIAnalyzer       *ai.OpenRouterConfig
 	CallbackStorage  *storage.CallbackStorage // Persistent storage for callback results
+	JoomlaClient     *joomla.JoomlaClient     // Client for Joomla integration
 }
 
 // NewMessageHandler creates a new message handler
@@ -161,6 +163,9 @@ func NewMessageHandler(bot *bot.BotClient, adminUserID int64) *MessageHandler {
 		log.Printf("Warning: Failed to initialize callback storage: %v", err)
 	}
 
+	// Initialize Joomla client
+	joomlaClient := joomla.NewJoomlaClient()
+
 	return &MessageHandler{
 		Bot:             bot,
 		MessageStore:    NewMessageStorage(),
@@ -169,6 +174,7 @@ func NewMessageHandler(bot *bot.BotClient, adminUserID int64) *MessageHandler {
 		TrackedChatID:   trackedChatID,
 		AIAnalyzer:      ai.NewOpenRouterConfig(prompt),
 		CallbackStorage: callbackStorage,
+		JoomlaClient:    joomlaClient,
 	}
 }
 
@@ -260,7 +266,7 @@ func (h *MessageHandler) handleCallbackQuery(update schemes.UpdateInterface) err
 	// Check if this callback has already been processed
 	if h.CallbackStorage != nil && h.CallbackStorage.Exists(callbackID) {
 		result, _ := h.CallbackStorage.GetResult(callbackID)
-		
+
 		// Send message informing that this callback was already processed
 		var responseText string
 		if result.Payload == "accept" {
@@ -268,7 +274,7 @@ func (h *MessageHandler) handleCallbackQuery(update schemes.UpdateInterface) err
 		} else {
 			responseText = "ℹ️ Этот ответ уже был обработан: ❌ Действие отменено"
 		}
-		
+
 		log.Printf("Callback %s already processed with payload '%s', informing user", callbackID, result.Payload)
 		return h.sendSimpleResponse(chatID, responseText)
 	}
@@ -278,23 +284,63 @@ func (h *MessageHandler) handleCallbackQuery(update schemes.UpdateInterface) err
 	case "accept":
 		log.Printf("User %d accepted the changes", userID)
 
-		// Save the result to storage
-		if h.CallbackStorage != nil {
-			result := storage.CallbackResult{
-				CallbackID:  callbackID,
-				UserID:      userID,
-				ChatID:      chatID,
-				Payload:     payload,
-				MessageText: callbackUpdate.Message.Body.Text,
-				ProcessedAt: time.Now(),
+		// Check if we already have planned changes stored
+		existingResult, exists := h.CallbackStorage.GetResult(callbackID)
+		
+		if exists && existingResult.Analysis != nil && len(existingResult.PlannedChanges) > 0 {
+			// Changes were already planned, now apply them
+			log.Printf("Applying %d planned changes for callback %s", len(existingResult.PlannedChanges), callbackID)
+			
+			// Send message that processing has started
+			h.sendSimpleResponse(chatID, "⏳ Начинаю обработку изменений на сайте...")
+			
+			// Apply the changes
+			response := h.JoomlaClient.Apply(*existingResult.Analysis, existingResult.PlannedChanges)
+			
+			if response == nil {
+				h.sendSimpleResponse(chatID, "❌ Ошибка: не удалось применить изменения (пустой ответ)")
+				return nil
 			}
-			if err := h.CallbackStorage.AddResult(result); err != nil {
-				log.Printf("Error saving callback result: %v", err)
+			
+			if response.Success && len(response.UpdatedArticles) > 0 {
+				// Success!
+				msg := fmt.Sprintf("✅ Успешно обновлено статей: %d\nСтатьи: %v", 
+					len(response.UpdatedArticles), response.UpdatedArticles)
+				h.sendSimpleResponse(chatID, msg)
+			} else if response.Success {
+				h.sendSimpleResponse(chatID, "✅ Изменений не потребовалось (статус Продолжение)")
+			} else {
+				// Partial failure or error
+				errorsText := strings.Join(response.Errors, "\n")
+				if len(response.UpdatedArticles) > 0 {
+					msg := fmt.Sprintf("⚠️ Частично выполнено.\nОбновлено статей: %d\nОшибки:\n%s", 
+						len(response.UpdatedArticles), errorsText)
+					h.sendSimpleResponse(chatID, msg)
+				} else {
+					msg := fmt.Sprintf("❌ Ошибка обновления:\n%s", errorsText)
+					h.sendSimpleResponse(chatID, msg)
+				}
 			}
+			
+			// Update the result with final status
+			if h.CallbackStorage != nil {
+				existingResult.UserID = userID
+				existingResult.Payload = payload
+				existingResult.ProcessedAt = time.Now()
+				if err := h.CallbackStorage.AddResult(existingResult); err != nil {
+					log.Printf("Error saving callback result: %v", err)
+				}
+			}
+			
+			return nil
 		}
-
-		// TODO: Implement website update logic here
-		return h.sendSimpleResponse(chatID, "✅ Принято! Обработка правки страницы на сайте...")
+		
+		// First time accept - save the analysis and planned changes from the message
+		// The analysis was already stored when the message was sent
+		// We need to extract it from the message text or re-analyze
+		log.Printf("First accept for callback %s - need to re-analyze", callbackID)
+		h.sendSimpleResponse(chatID, "⚠️ Требуется повторный анализ. Отправьте сообщение заново.")
+		return nil
 
 	case "cancel":
 		log.Printf("User %d cancelled the action", userID)
@@ -466,37 +512,30 @@ func (h *MessageHandler) analyzeMessageWithAI(msg schemes.Message) {
 	for _, analysis := range analyses {
 		// Only send to admin if the message is valid (contains absence information)
 		if analysis.IsValid {
+			// Analyze changes in Joomla
+			var plannedChanges []joomla.Change
+			var joomlaError error
+			
+			if h.JoomlaClient != nil {
+				joomlaResponse, err := h.JoomlaClient.Analyze(analysis)
+				if err != nil {
+					log.Printf("Error analyzing Joomla changes: %v", err)
+					joomlaError = err
+				} else if joomlaResponse != nil {
+					plannedChanges = joomlaResponse.Changes
+					if !joomlaResponse.Success && len(joomlaResponse.Errors) > 0 {
+						log.Printf("Joomla analysis errors: %v", joomlaResponse.Errors)
+					}
+				}
+			}
+
 			// Send the analysis result to the admin user's private chat
 			if h.AdminUserID != 0 {
 				// Use the admin's chat ID from environment variable or previously set value
 				adminChatID := h.AdminChatID
 
 				// Format the analysis result in a readable way with markdown and emojis
-				formattedMessage := fmt.Sprintf(
-					"📋 НОВАЯ ЗАПИСЬ\n\n"+
-						"🏥 Тип: %s\n"+
-						"📊 Статус: %s\n"+
-						"🏢 Подразделение: \n"+ // Will be filled based on position if needed
-						"💼 Должность: %s\n"+
-						"👤 ФИО: %s\n"+
-						"📅 Дата начала: %s\n"+
-						"🔚 Дата окончания: %s\n"+
-						"💬 Оригинальное сообщение: \n> %s\n\n"+
-						"❓ Внести изменения на сайт?\n"+
-						"✅ Да / ❌ Нет",
-					analysis.AbsenceType,
-					analysis.Status,
-					analysis.Employee.Position,
-					analysis.Employee.FullName,
-					analysis.Dates.StartDate,
-					func() string {
-						if analysis.Dates.EndDate == "" {
-							return "⏳"
-						}
-						return analysis.Dates.EndDate
-					}(),
-					analysis.OriginalMessage,
-				)
+				formattedMessage := h.formatAnalysisMessage(analysis, plannedChanges, joomlaError)
 
 				// Only send if we have a valid chat ID
 				if adminChatID != 0 {
@@ -509,9 +548,30 @@ func (h *MessageHandler) analyzeMessageWithAI(msg schemes.Message) {
 					messageID, err := h.Bot.SendMessageWithKeyboard(adminChatID, formattedMessage, buttons)
 					if err != nil {
 						log.Printf("Error sending formatted AI analysis to admin's chat %d: %v", adminChatID, err)
-						// Don't use fallback - we want to avoid duplicate messages
 					} else {
 						log.Printf("Successfully sent formatted AI analysis to admin's chat %d with message ID: %s for employee: %s", adminChatID, messageID, analysis.Employee.FullName)
+
+						// Save the analysis and planned changes to callback storage
+						// We use the message ID as the callback key
+						if h.CallbackStorage != nil {
+							// Store analysis and planned changes for later use when user clicks "accept"
+							result := storage.CallbackResult{
+								CallbackID:     messageID, // Will be matched with callback_id
+								UserID:         0,         // Will be set when user clicks
+								ChatID:         adminChatID,
+								Payload:        "",        // Will be set when user clicks
+								MessageText:    formattedMessage,
+								ProcessedAt:    time.Now(),
+								Analysis:       &analysis,
+								PlannedChanges: plannedChanges,
+							}
+							// Save immediately so we can retrieve it when user clicks
+							if err := h.CallbackStorage.AddResult(result); err != nil {
+								log.Printf("Error saving callback result with analysis: %v", err)
+							} else {
+								log.Printf("Saved analysis for message %s with %d planned changes", messageID, len(plannedChanges))
+							}
+						}
 					}
 				} else {
 					log.Printf("Cannot send AI analysis to admin: ADMIN_CHAT_ID not set in environment variables")
@@ -530,5 +590,77 @@ func (h *MessageHandler) analyzeMessageWithAI(msg schemes.Message) {
 	}
 	if allInvalid && len(analyses) > 0 {
 		log.Printf("Message is not valid for absence tracking, not sending to admin")
+	}
+}
+
+// formatAnalysisMessage formats the analysis result and planned changes into a readable message
+func (h *MessageHandler) formatAnalysisMessage(analysis joomla.AnalysisResult, changes []joomla.Change, joomlaErr error) string {
+	var sb strings.Builder
+	
+	sb.WriteString("📋 НОВАЯ ЗАПИСЬ\n\n")
+	sb.WriteString(fmt.Sprintf("🏥 Тип: %s\n", analysis.AbsenceType))
+	sb.WriteString(fmt.Sprintf("📊 Статус: %s\n", analysis.Status))
+	sb.WriteString(fmt.Sprintf("💼 Должность: %s\n", analysis.Employee.Position))
+	sb.WriteString(fmt.Sprintf("👤 ФИО: %s\n", analysis.Employee.FullName))
+	sb.WriteString(fmt.Sprintf("📅 Дата начала: %s\n", analysis.Dates.StartDate))
+	
+	endDate := analysis.Dates.EndDate
+	if endDate == "" {
+		endDate = "⏳"
+	}
+	sb.WriteString(fmt.Sprintf("🔚 Дата окончания: %s\n", endDate))
+	sb.WriteString(fmt.Sprintf("💬 Оригинальное сообщение:\n> %s\n", analysis.OriginalMessage))
+	
+	// Add Joomla changes info
+	sb.WriteString("\n━━━━━━━━━━━━━━━━━━━━\n")
+	sb.WriteString("🔧 ПЛАНИРУЕМЫЕ ИЗМЕНЕНИЯ:\n\n")
+	
+	if joomlaErr != nil {
+		sb.WriteString(fmt.Sprintf("❌ Ошибка анализа сайта: %v\n", joomlaErr))
+	} else if len(changes) == 0 {
+		if analysis.Status == "Продолжение" {
+			sb.WriteString("ℹ️ Статус \"Продолжение\" - изменения не требуются\n")
+		} else {
+			sb.WriteString("⚠️ Врач не найден в статьях сайта\n")
+		}
+	} else {
+		for i, change := range changes {
+			sb.WriteString(fmt.Sprintf("%d. Статья #%d\n", i+1, change.ArticleID))
+			sb.WriteString(fmt.Sprintf("   Врач: %s\n", change.Doctor))
+			if change.Action == "add" {
+				sb.WriteString("   Действие: ➕ Добавить пометку\n")
+			} else if change.Action == "remove" {
+				sb.WriteString("   Действие: ➖ Убрать пометку\n")
+			}
+			sb.WriteString("\n")
+		}
+	}
+	
+	sb.WriteString("━━━━━━━━━━━━━━━━━━━━\n")
+	sb.WriteString("❓ Внести изменения на сайт?\n")
+	sb.WriteString("✅ Да / ❌ Нет")
+	
+	return sb.String()
+}
+
+// saveCallbackWithAnalysis saves callback result with analysis and planned changes
+func (h *MessageHandler) saveCallbackWithAnalysis(callbackID string, userID, chatID int64, payload, messageText string, analysis *joomla.AnalysisResult, changes []joomla.Change) {
+	if h.CallbackStorage == nil {
+		return
+	}
+	
+	result := storage.CallbackResult{
+		CallbackID:     callbackID,
+		UserID:         userID,
+		ChatID:         chatID,
+		Payload:        payload,
+		MessageText:    messageText,
+		ProcessedAt:    time.Now(),
+		Analysis:       analysis,
+		PlannedChanges: changes,
+	}
+	
+	if err := h.CallbackStorage.AddResult(result); err != nil {
+		log.Printf("Error saving callback result with analysis: %v", err)
 	}
 }
