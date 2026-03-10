@@ -424,33 +424,44 @@ def main():
     parser.add_argument('command', choices=['analyze', 'apply'], help='Команда: analyze или apply')
     parser.add_argument('--json', required=True, help='JSON данные от бота')
     parser.add_argument('--changes', help='JSON с изменениями (для apply)')
-    
+
     args = parser.parse_args()
-    
+
     try:
         json_data = json.loads(args.json)
     except json.JSONDecodeError as e:
         print(json.dumps({'success': False, 'errors': [f'Ошибка парсинга JSON: {e}']}))
         sys.exit(1)
-    
+
+    # Отладка: выводим полученный JSON
+    print(f"DEBUG: Parsed JSON - full_name='{json_data.get('Employee', {}).get('FullName', '')}'", file=sys.stderr)
+
     if args.command == 'analyze':
         # Получаем содержимое всех статей
         articles = {}
         session = requests.Session()
         session.headers.update({'User-Agent': config.USER_AGENT})
-        
+
+        print(f"DEBUG: Starting Joomla login to {config.ADMIN_URL}", file=sys.stderr)
         csrf_token = login(session)
         if not csrf_token:
+            print(f"DEBUG: Login failed", file=sys.stderr)
             print(json.dumps({'success': False, 'errors': ['Не удалось аутентифицироваться']}))
             sys.exit(1)
         
-        for article_id in getattr(config, 'ARTICLE_IDS', [1025, 1027, 1028, 1029]):
+        print(f"DEBUG: Login successful, CSRF token: {csrf_token[:10]}...", file=sys.stderr)
+
+        article_ids = getattr(config, 'ARTICLE_IDS', [1025, 1027, 1028, 1029])
+        print(f"DEBUG: Loading articles: {article_ids}", file=sys.stderr)
+        
+        for article_id in article_ids:
             content = get_article_content(session, article_id)
             if content:
                 articles[article_id] = content
+                print(f"DEBUG: Loaded article {article_id} ({len(content)} chars)", file=sys.stderr)
             else:
-                print(f"Warning: не удалось получить статью {article_id}", file=sys.stderr)
-        
+                print(f"DEBUG: Failed to load article {article_id}", file=sys.stderr)
+
         result = analyze_changes(json_data, articles)
         print(json.dumps(result, ensure_ascii=False, indent=2))
     

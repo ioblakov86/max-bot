@@ -35,5 +35,17 @@ COPY --from=builder /app/prompt.txt .
 # Копируем Joomla утилиты
 COPY --from=builder /app/joomla/ ./joomla/
 
+# Создаём config.py из переменных окружения
+RUN echo "# Auto-generated config from environment variables" > joomla/config.py && \
+    echo "SITE_URL = '${JOOMLA_SITE_URL:-https://plk32.ru}'" >> joomla/config.py && \
+    echo "ADMIN_URL = '${JOOMLA_ADMIN_URL:-https://plk32.ru/administrator}'" >> joomla/config.py && \
+    echo "USERNAME = '${JOOMLA_USERNAME:-}'" >> joomla/config.py && \
+    echo "PASSWORD = '${JOOMLA_PASSWORD:-}'" >> joomla/config.py && \
+    echo "API_TOKEN = '${JOOMLA_API_TOKEN:-}'" >> joomla/config.py && \
+    echo "REQUEST_TIMEOUT = 30" >> joomla/config.py && \
+    echo "VERIFY_SSL = True" >> joomla/config.py && \
+    echo "USER_AGENT = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'" >> joomla/config.py && \
+    echo "ARTICLE_IDS = [1025, 1027, 1028, 1029]" >> joomla/config.py
+
 # Запускаем бота
 CMD ["./max-bot"]
