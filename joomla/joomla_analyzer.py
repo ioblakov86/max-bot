@@ -315,6 +315,10 @@ def analyze_changes(json_data: Dict[str, Any], articles: Dict[int, str]) -> Dict
     dates = json_data.get('Dates', {})
     status = json_data.get('Status', '')
     
+    # Отладочное логирование
+    print(f"DEBUG: Received JSON - full_name='{full_name}', status='{status}'", file=sys.stderr)
+    print(f"DEBUG: Articles loaded: {list(articles.keys())}", file=sys.stderr)
+    
     if not full_name:
         result['success'] = False
         result['errors'].append('Не указано ФИО сотрудника')

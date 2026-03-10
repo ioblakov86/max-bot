@@ -154,11 +154,15 @@ func (c *JoomlaClient) Analyze(analysis AnalysisResult) (*AnalyzeResponse, error
 		return nil, fmt.Errorf("failed to marshal analysis: %w", err)
 	}
 
+	// Debug logging
+	fmt.Printf("DEBUG: Sending to Python - JSON: %s\n", string(analysisJSON))
+
 	// Run the Python script with retries
 	var response AnalyzeResponse
 	err = c.runWithRetries(func() error {
 		cmd := exec.Command(c.PythonPath, c.ScriptPath, "analyze", "--json", string(analysisJSON))
 		cmd.Env = c.buildEnv()
+		cmd.Dir = c.GetScriptDirectory()
 
 		var stdout, stderr bytes.Buffer
 		cmd.Stdout = &stdout
@@ -166,6 +170,8 @@ func (c *JoomlaClient) Analyze(analysis AnalysisResult) (*AnalyzeResponse, error
 
 		err := cmd.Run()
 		if err != nil {
+			fmt.Printf("DEBUG: Python stderr: %s\n", stderr.String())
+			fmt.Printf("DEBUG: Python stdout: %s\n", stdout.String())
 			return fmt.Errorf("script execution failed: %w, stderr: %s", err, stderr.String())
 		}
 
