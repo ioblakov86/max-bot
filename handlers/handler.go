@@ -290,21 +290,26 @@ func (h *MessageHandler) handleCallbackQuery(update schemes.UpdateInterface) err
 		if exists && existingResult.Analysis != nil && len(existingResult.PlannedChanges) > 0 {
 			// Changes were already planned, now apply them
 			log.Printf("Applying %d planned changes for callback %s", len(existingResult.PlannedChanges), callbackID)
-			
+
 			// Send message that processing has started
 			h.sendSimpleResponse(chatID, "⏳ Начинаю обработку изменений на сайте...")
-			
+
 			// Apply the changes
-			response := h.JoomlaClient.Apply(*existingResult.Analysis, existingResult.PlannedChanges)
+			response, err := h.JoomlaClient.Apply(*existingResult.Analysis, existingResult.PlannedChanges)
+
+			if err != nil {
+				h.sendSimpleResponse(chatID, fmt.Sprintf("❌ Ошибка: %v", err))
+				return nil
+			}
 			
 			if response == nil {
 				h.sendSimpleResponse(chatID, "❌ Ошибка: не удалось применить изменения (пустой ответ)")
 				return nil
 			}
-			
+
 			if response.Success && len(response.UpdatedArticles) > 0 {
 				// Success!
-				msg := fmt.Sprintf("✅ Успешно обновлено статей: %d\nСтатьи: %v", 
+				msg := fmt.Sprintf("✅ Успешно обновлено статей: %d\nСтатьи: %v",
 					len(response.UpdatedArticles), response.UpdatedArticles)
 				h.sendSimpleResponse(chatID, msg)
 			} else if response.Success {
@@ -512,12 +517,15 @@ func (h *MessageHandler) analyzeMessageWithAI(msg schemes.Message) {
 	for _, analysis := range analyses {
 		// Only send to admin if the message is valid (contains absence information)
 		if analysis.IsValid {
+			// Convert ai.MessageAnalysis to joomla.AnalysisResult
+			joomlaAnalysis := convertToJoomlaAnalysis(analysis)
+			
 			// Analyze changes in Joomla
 			var plannedChanges []joomla.Change
 			var joomlaError error
-			
+
 			if h.JoomlaClient != nil {
-				joomlaResponse, err := h.JoomlaClient.Analyze(analysis)
+				joomlaResponse, err := h.JoomlaClient.Analyze(joomlaAnalysis)
 				if err != nil {
 					log.Printf("Error analyzing Joomla changes: %v", err)
 					joomlaError = err
@@ -535,7 +543,7 @@ func (h *MessageHandler) analyzeMessageWithAI(msg schemes.Message) {
 				adminChatID := h.AdminChatID
 
 				// Format the analysis result in a readable way with markdown and emojis
-				formattedMessage := h.formatAnalysisMessage(analysis, plannedChanges, joomlaError)
+				formattedMessage := h.formatAnalysisMessage(joomlaAnalysis, plannedChanges, joomlaError)
 
 				// Only send if we have a valid chat ID
 				if adminChatID != 0 {
@@ -562,7 +570,7 @@ func (h *MessageHandler) analyzeMessageWithAI(msg schemes.Message) {
 								Payload:        "",        // Will be set when user clicks
 								MessageText:    formattedMessage,
 								ProcessedAt:    time.Now(),
-								Analysis:       &analysis,
+								Analysis:       &joomlaAnalysis,
 								PlannedChanges: plannedChanges,
 							}
 							// Save immediately so we can retrieve it when user clicks
@@ -662,5 +670,24 @@ func (h *MessageHandler) saveCallbackWithAnalysis(callbackID string, userID, cha
 	
 	if err := h.CallbackStorage.AddResult(result); err != nil {
 		log.Printf("Error saving callback result with analysis: %v", err)
+	}
+}
+
+// convertToJoomlaAnalysis converts ai.MessageAnalysis to joomla.AnalysisResult
+func convertToJoomlaAnalysis(msgAnalysis ai.MessageAnalysis) joomla.AnalysisResult {
+	return joomla.AnalysisResult{
+		OriginalMessage: msgAnalysis.OriginalMessage,
+		IsValid:         msgAnalysis.IsValid,
+		Employee: joomla.Employee{
+			Position: msgAnalysis.Employee.Position,
+			FullName: msgAnalysis.Employee.FullName,
+		},
+		AbsenceType: msgAnalysis.AbsenceType,
+		Dates: joomla.Dates{
+			StartDate: msgAnalysis.Dates.StartDate,
+			EndDate:   msgAnalysis.Dates.EndDate,
+		},
+		Status:     msgAnalysis.Status,
+		Substitute: msgAnalysis.Substitute,
 	}
 }
