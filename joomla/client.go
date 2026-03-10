@@ -94,11 +94,12 @@ func NewJoomlaClient() *JoomlaClient {
 		articleIDs = []int64{1025, 1027, 1028, 1029}
 	}
 
-	// Find the script path
-	scriptPath := "joomla/joomla_analyzer.py"
+	// Find the script path - try absolute path first (for Docker), then relative
+	scriptPath := "/root/joomla/joomla_analyzer.py"
 	// Try different paths
 	possiblePaths := []string{
-		"joomla/joomla_analyzer.py",
+		"/root/joomla/joomla_analyzer.py",  // Absolute path (Docker)
+		"joomla/joomla_analyzer.py",        // Relative from project root
 		"./joomla/joomla_analyzer.py",
 		"../joomla/joomla_analyzer.py",
 	}
@@ -309,5 +310,14 @@ func (c *JoomlaClient) CheckScript() bool {
 
 // GetScriptDirectory returns the directory containing the script
 func (c *JoomlaClient) GetScriptDirectory() string {
-	return filepath.Dir(c.ScriptPath)
+	dir := filepath.Dir(c.ScriptPath)
+	// If using absolute path, return it directly
+	if filepath.IsAbs(c.ScriptPath) {
+		return dir
+	}
+	// For relative paths, try to get absolute path
+	if absDir, err := filepath.Abs(dir); err == nil {
+		return absDir
+	}
+	return dir
 }
