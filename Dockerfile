@@ -17,11 +17,11 @@ RUN go mod tidy
 # Собираем бинарный файл для Linux
 RUN CGO_ENABLED=0 GOOS=linux go build -o max-bot main.go
 
-# Второй этап сборки - используем минимальный образ
+# Второй этап сборки - используем минимальный образ с Python
 FROM alpine:latest
 
-# Устанавливаем зависимости
-RUN apk --no-cache add ca-certificates
+# Устанавливаем зависимости: Python, SSL сертификаты, зависимости для BeautifulSoup
+RUN apk --no-cache add ca-certificates python3 py3-pip py3-beautifulsoup4 py3-requests
 
 # Создаем директорию для работы приложения
 WORKDIR /root/
@@ -31,6 +31,9 @@ COPY --from=builder /app/max-bot .
 
 # Копируем файл промпта из первого образа
 COPY --from=builder /app/prompt.txt .
+
+# Копируем Joomla утилиты
+COPY --from=builder /app/joomla/ ./joomla/
 
 # Запускаем бота
 CMD ["./max-bot"]
