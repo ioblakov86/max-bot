@@ -172,9 +172,11 @@ func (c *JoomlaClient) Analyze(analysis AnalysisResult) (*AnalyzeResponse, error
 
 		err := cmd.Run()
 		if err != nil {
-			fmt.Printf("DEBUG: Python stderr: %s\n", stderr.String())
-			fmt.Printf("DEBUG: Python stdout: %s\n", stdout.String())
-			return fmt.Errorf("script execution failed: %w, stderr: %s", err, stderr.String())
+			stderrStr := stderr.String()
+			stdoutStr := stdout.String()
+			log.Printf("DEBUG: Python stderr: %s", stderrStr)
+			log.Printf("DEBUG: Python stdout: %s", stdoutStr)
+			return fmt.Errorf("script execution failed: %w, stderr: %s", err, stderrStr)
 		}
 
 		// Parse the JSON response
