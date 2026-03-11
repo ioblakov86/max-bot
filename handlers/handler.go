@@ -285,21 +285,28 @@ func (h *MessageHandler) handleCallbackQuery(update schemes.UpdateInterface) err
 		log.Printf("User %d accepted the changes", userID)
 
 		// Извлекаем анализ из текста сообщения
-		// Формат: "📋 НОВАЯ ЗАПИСЬ\n\n🏥 Тип: Больничный..."
-		// Парсим сообщение для получения данных
+		log.Printf("Extracting analysis from message: %s...", callbackUpdate.Message.Body.Text[:50])
 		analysis := h.extractAnalysisFromMessage(callbackUpdate.Message.Body.Text)
 		
 		if analysis == nil {
+			log.Printf("Failed to extract analysis from message")
 			h.sendSimpleResponse(chatID, "❌ Ошибка: не удалось извлечь данные из сообщения")
 			return nil
 		}
+		
+		log.Printf("Extracted analysis: FullName=%s, Status=%s, AbsenceType=%s", 
+			analysis.Employee.FullName, analysis.Status, analysis.AbsenceType)
 
 		// Анализируем изменения ещё раз (быстрый путь)
+		log.Printf("Running Joomla analysis...")
 		joomlaResponse, err := h.JoomlaClient.Analyze(*analysis)
 		if err != nil {
+			log.Printf("Joomla analysis error: %v", err)
 			h.sendSimpleResponse(chatID, fmt.Sprintf("❌ Ошибка анализа: %v", err))
 			return nil
 		}
+
+		log.Printf("Joomla analysis result: %d changes, success=%v", len(joomlaResponse.Changes), joomlaResponse.Success)
 
 		if joomlaResponse == nil || (len(joomlaResponse.Changes) == 0 && !joomlaResponse.Success) {
 			h.sendSimpleResponse(chatID, "⚠️ Нет изменений для применения")
@@ -312,24 +319,22 @@ func (h *MessageHandler) handleCallbackQuery(update schemes.UpdateInterface) err
 
 		response, err := h.JoomlaClient.Apply(*analysis, joomlaResponse.Changes)
 		if err != nil {
+			log.Printf("Joomla apply error: %v", err)
 			h.sendSimpleResponse(chatID, fmt.Sprintf("❌ Ошибка: %v", err))
 			return nil
 		}
 
-		if response == nil {
-			h.sendSimpleResponse(chatID, "❌ Ошибка: не удалось применить изменения (пустой ответ)")
-			return nil
-		}
+		log.Printf("Joomla apply result: updated=%v, errors=%v", response.UpdatedArticles, response.Errors)
 
 		if response.Success && len(response.UpdatedArticles) > 0 {
-			// Success!
 			msg := fmt.Sprintf("✅ Успешно обновлено статей: %d\nСтатьи: %v",
 				len(response.UpdatedArticles), response.UpdatedArticles)
+			log.Printf("Success: %s", msg)
 			h.sendSimpleResponse(chatID, msg)
 		} else if response.Success {
+			log.Printf("Success: no changes needed")
 			h.sendSimpleResponse(chatID, "✅ Изменений не потребовалось (статус Продолжение)")
 		} else {
-			// Partial failure or error
 			errorsText := strings.Join(response.Errors, "\n")
 			if len(response.UpdatedArticles) > 0 {
 				msg := fmt.Sprintf("⚠️ Частично выполнено.\nОбновлено статей: %d\nОшибки:\n%s",
