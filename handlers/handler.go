@@ -284,67 +284,80 @@ func (h *MessageHandler) handleCallbackQuery(update schemes.UpdateInterface) err
 	case "accept":
 		log.Printf("User %d accepted the changes", userID)
 
-		// Check if we already have planned changes stored
-		existingResult, exists := h.CallbackStorage.GetResult(callbackID)
+		// Извлекаем анализ из текста сообщения
+		// Формат: "📋 НОВАЯ ЗАПИСЬ\n\n🏥 Тип: Больничный..."
+		// Парсим сообщение для получения данных
+		analysis := h.extractAnalysisFromMessage(callbackUpdate.Message.Body.Text)
 		
-		if exists && existingResult.Analysis != nil && len(existingResult.PlannedChanges) > 0 {
-			// Changes were already planned, now apply them
-			log.Printf("Applying %d planned changes for callback %s", len(existingResult.PlannedChanges), callbackID)
-
-			// Send message that processing has started
-			h.sendSimpleResponse(chatID, "⏳ Начинаю обработку изменений на сайте...")
-
-			// Apply the changes
-			response, err := h.JoomlaClient.Apply(*existingResult.Analysis, existingResult.PlannedChanges)
-
-			if err != nil {
-				h.sendSimpleResponse(chatID, fmt.Sprintf("❌ Ошибка: %v", err))
-				return nil
-			}
-			
-			if response == nil {
-				h.sendSimpleResponse(chatID, "❌ Ошибка: не удалось применить изменения (пустой ответ)")
-				return nil
-			}
-
-			if response.Success && len(response.UpdatedArticles) > 0 {
-				// Success!
-				msg := fmt.Sprintf("✅ Успешно обновлено статей: %d\nСтатьи: %v",
-					len(response.UpdatedArticles), response.UpdatedArticles)
-				h.sendSimpleResponse(chatID, msg)
-			} else if response.Success {
-				h.sendSimpleResponse(chatID, "✅ Изменений не потребовалось (статус Продолжение)")
-			} else {
-				// Partial failure or error
-				errorsText := strings.Join(response.Errors, "\n")
-				if len(response.UpdatedArticles) > 0 {
-					msg := fmt.Sprintf("⚠️ Частично выполнено.\nОбновлено статей: %d\nОшибки:\n%s", 
-						len(response.UpdatedArticles), errorsText)
-					h.sendSimpleResponse(chatID, msg)
-				} else {
-					msg := fmt.Sprintf("❌ Ошибка обновления:\n%s", errorsText)
-					h.sendSimpleResponse(chatID, msg)
-				}
-			}
-			
-			// Update the result with final status
-			if h.CallbackStorage != nil {
-				existingResult.UserID = userID
-				existingResult.Payload = payload
-				existingResult.ProcessedAt = time.Now()
-				if err := h.CallbackStorage.AddResult(existingResult); err != nil {
-					log.Printf("Error saving callback result: %v", err)
-				}
-			}
-			
+		if analysis == nil {
+			h.sendSimpleResponse(chatID, "❌ Ошибка: не удалось извлечь данные из сообщения")
 			return nil
 		}
-		
-		// First time accept - save the analysis and planned changes from the message
-		// The analysis was already stored when the message was sent
-		// We need to extract it from the message text or re-analyze
-		log.Printf("First accept for callback %s - need to re-analyze", callbackID)
-		h.sendSimpleResponse(chatID, "⚠️ Требуется повторный анализ. Отправьте сообщение заново.")
+
+		// Анализируем изменения ещё раз (быстрый путь)
+		joomlaResponse, err := h.JoomlaClient.Analyze(*analysis)
+		if err != nil {
+			h.sendSimpleResponse(chatID, fmt.Sprintf("❌ Ошибка анализа: %v", err))
+			return nil
+		}
+
+		if joomlaResponse == nil || (len(joomlaResponse.Changes) == 0 && !joomlaResponse.Success) {
+			h.sendSimpleResponse(chatID, "⚠️ Нет изменений для применения")
+			return nil
+		}
+
+		// Применяем изменения
+		log.Printf("Applying %d planned changes", len(joomlaResponse.Changes))
+		h.sendSimpleResponse(chatID, "⏳ Начинаю обработку изменений на сайте...")
+
+		response, err := h.JoomlaClient.Apply(*analysis, joomlaResponse.Changes)
+		if err != nil {
+			h.sendSimpleResponse(chatID, fmt.Sprintf("❌ Ошибка: %v", err))
+			return nil
+		}
+
+		if response == nil {
+			h.sendSimpleResponse(chatID, "❌ Ошибка: не удалось применить изменения (пустой ответ)")
+			return nil
+		}
+
+		if response.Success && len(response.UpdatedArticles) > 0 {
+			// Success!
+			msg := fmt.Sprintf("✅ Успешно обновлено статей: %d\nСтатьи: %v",
+				len(response.UpdatedArticles), response.UpdatedArticles)
+			h.sendSimpleResponse(chatID, msg)
+		} else if response.Success {
+			h.sendSimpleResponse(chatID, "✅ Изменений не потребовалось (статус Продолжение)")
+		} else {
+			// Partial failure or error
+			errorsText := strings.Join(response.Errors, "\n")
+			if len(response.UpdatedArticles) > 0 {
+				msg := fmt.Sprintf("⚠️ Частично выполнено.\nОбновлено статей: %d\nОшибки:\n%s",
+					len(response.UpdatedArticles), errorsText)
+				h.sendSimpleResponse(chatID, msg)
+			} else {
+				msg := fmt.Sprintf("❌ Ошибка обновления:\n%s", errorsText)
+				h.sendSimpleResponse(chatID, msg)
+			}
+		}
+
+		// Save the result
+		if h.CallbackStorage != nil {
+			result := storage.CallbackResult{
+				CallbackID:     callbackID,
+				UserID:         userID,
+				ChatID:         chatID,
+				Payload:        payload,
+				MessageText:    callbackUpdate.Message.Body.Text,
+				ProcessedAt:    time.Now(),
+				Analysis:       analysis,
+				PlannedChanges: joomlaResponse.Changes,
+			}
+			if err := h.CallbackStorage.AddResult(result); err != nil {
+				log.Printf("Error saving callback result: %v", err)
+			}
+		}
+
 		return nil
 
 	case "cancel":
@@ -690,4 +703,48 @@ func convertToJoomlaAnalysis(msgAnalysis ai.MessageAnalysis) joomla.AnalysisResu
 		Status:     msgAnalysis.Status,
 		Substitute: msgAnalysis.Substitute,
 	}
+}
+
+// extractAnalysisFromMessage извлекает данные анализа из текста сообщения
+func (h *MessageHandler) extractAnalysisFromMessage(text string) *joomla.AnalysisResult {
+	// Парсим сообщение вида:
+	// 📋 НОВАЯ ЗАПИСЬ
+	// 🏥 Тип: Больничный
+	// 📊 Статус: Начало
+	// 💼 Должность: врач- терапевт участковый
+	// 👤 ФИО: Кузьменко М.С
+	// 📅 Дата начала: 10.03.26
+	// 🔚 Дата окончания: ⏳
+	
+	analysis := &joomla.AnalysisResult{}
+	
+	lines := strings.Split(text, "\n")
+	for _, line := range lines {
+		line = strings.TrimSpace(line)
+		
+		if strings.HasPrefix(line, "🏥 Тип:") {
+			analysis.AbsenceType = strings.TrimSpace(strings.TrimPrefix(line, "🏥 Тип:"))
+		} else if strings.HasPrefix(line, "📊 Статус:") {
+			analysis.Status = strings.TrimSpace(strings.TrimPrefix(line, "📊 Статус:"))
+		} else if strings.HasPrefix(line, "💼 Должность:") {
+			analysis.Employee.Position = strings.TrimSpace(strings.TrimPrefix(line, "💼 Должность:"))
+		} else if strings.HasPrefix(line, "👤 ФИО:") {
+			analysis.Employee.FullName = strings.TrimSpace(strings.TrimPrefix(line, "👤 ФИО:"))
+		} else if strings.HasPrefix(line, "📅 Дата начала:") {
+			analysis.Dates.StartDate = strings.TrimSpace(strings.TrimPrefix(line, "📅 Дата начала:"))
+		} else if strings.HasPrefix(line, "🔚 Дата окончания:") {
+			endDate := strings.TrimSpace(strings.TrimPrefix(line, "🔚 Дата окончания:"))
+			if endDate != "⏳" {
+				analysis.Dates.EndDate = endDate
+			}
+		}
+	}
+	
+	// Проверяем, что данные извлечены
+	if analysis.Employee.FullName == "" {
+		return nil
+	}
+	
+	analysis.IsValid = true
+	return analysis
 }
