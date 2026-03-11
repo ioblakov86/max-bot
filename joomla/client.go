@@ -179,8 +179,12 @@ func (c *JoomlaClient) Analyze(analysis AnalysisResult) (*AnalyzeResponse, error
 			return fmt.Errorf("script execution failed: %w, stderr: %s", err, stderrStr)
 		}
 
+		// Log stdout for debugging
+		log.Printf("DEBUG: Python output: %s", stdout.String())
+
 		// Parse the JSON response
 		if err := json.Unmarshal(stdout.Bytes(), &response); err != nil {
+			log.Printf("DEBUG: Failed to parse JSON: %s", stdout.String())
 			return fmt.Errorf("failed to parse response JSON: %w, output: %s", err, stdout.String())
 		}
 

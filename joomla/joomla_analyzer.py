@@ -256,24 +256,32 @@ def create_absence_span(absence_type: str, dates: Dict[str, str]) -> str:
 def add_absence_to_td(td_element, absence_span: str) -> str:
     """
     Добавляет пометку о больничном/отпуске в <td> элемент
+    Сначала пытается раскомментировать существующую закомментированную пометку
     """
-    # Проверяем, есть ли уже такая пометка
     td_html = str(td_element)
-    
-    # Ищем существующие span с пометками
+
+    # Ищем закомментированную пометку <!-- <br /><span...> -->
+    import re
+    commented_span_pattern = r'<!--\s*(<br\s*/?>\s*<span[^>]*color:\s*red[^>]*>.*?</span>)\s*-->'
+    commented_match = re.search(commented_span_pattern, td_html, re.IGNORECASE | re.DOTALL)
+
+    if commented_match:
+        # Раскомментируем существующую пометку
+        commented_html = commented_match.group(0)  # Весь комментарий
+        original_span = commented_match.group(1)    # Оригинальный span
+        modified = td_html.replace(commented_html, original_span)
+        return modified
+
+    # Ищем существующие активные span с пометками
     existing_span = td_element.find('span', style=lambda x: x and 'color: red' in x if x else False)
-    
+
     if existing_span:
-        # Уже есть пометка - не добавляем дубль
+        # Уже есть активная пометка - не добавляем дубль
         return None
-    
+
     # Вставляем перед закрывающим </td>
-    # Находим позицию для вставки - после последнего <br> или перед </td>
-    td_content = str(td_element)
-    
-    # Вставляем перед </td>
-    modified = td_content.replace('</td>', f'{absence_span}\n</td>', 1)
-    
+    modified = td_html.replace('</td>', f'{absence_span}\n</td>', 1)
+
     return modified
 
 
@@ -310,10 +318,13 @@ def analyze_changes(json_data: Dict[str, Any], articles: Dict[int, str]) -> Dict
     }
     
     employee = json_data.get('Employee', {})
-    full_name = employee.get('FullName', '')
-    absence_type = json_data.get('AbsenceType', '')
-    dates = json_data.get('Dates', {})
-    status = json_data.get('Status', '')
+    
+    # Поддержка обоих форматов: full_name (Go) и FullName (Python)
+    full_name = employee.get('FullName') or employee.get('full_name') or ''
+    
+    absence_type = json_data.get('AbsenceType', '') or json_data.get('absence_type', '')
+    dates = json_data.get('Dates', {}) or json_data.get('dates', {})
+    status = json_data.get('Status', '') or json_data.get('status', '')
     
     # Отладочное логирование - ДО проверок
     print(f"DEBUG: analyze_changes - full_name='{full_name}'", file=sys.stderr)
