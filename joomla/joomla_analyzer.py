@@ -317,14 +317,16 @@ def analyze_changes(json_data: Dict[str, Any], articles: Dict[int, str]) -> Dict
         'errors': []
     }
     
-    employee = json_data.get('Employee', {})
+    # Поддержка обоих форматов: Employee (Go struct) и employee (JSON lowercase)
+    employee = json_data.get('Employee') or json_data.get('employee') or {}
     
-    # Поддержка обоих форматов: full_name (Go) и FullName (Python)
+    # Поддержка обоих форматов: full_name (Go JSON) и FullName (Python)
     full_name = employee.get('FullName') or employee.get('full_name') or ''
     
-    absence_type = json_data.get('AbsenceType', '') or json_data.get('absence_type', '')
-    dates = json_data.get('Dates', {}) or json_data.get('dates', {})
-    status = json_data.get('Status', '') or json_data.get('status', '')
+    # Поддержка обоих форматов для остальных полей
+    absence_type = json_data.get('AbsenceType') or json_data.get('absence_type') or ''
+    dates = json_data.get('Dates') or json_data.get('dates') or {}
+    status = json_data.get('Status') or json_data.get('status') or ''
     
     # Отладочное логирование - ДО проверок
     print(f"DEBUG: analyze_changes - full_name='{full_name}'", file=sys.stderr)
