@@ -20,6 +20,13 @@ RUN CGO_ENABLED=0 GOOS=linux go build -o max-bot main.go
 # Второй этап сборки - используем минимальный образ с Python
 FROM alpine:latest
 
+# Аргументы для передачи переменных окружения при сборке
+ARG JOOMLA_SITE_URL=https://plk32.ru
+ARG JOOMLA_ADMIN_URL=https://plk32.ru/administrator
+ARG JOOMLA_USERNAME=
+ARG JOOMLA_PASSWORD=
+ARG JOOMLA_API_TOKEN=
+
 # Устанавливаем зависимости: Python, SSL сертификаты, зависимости для BeautifulSoup
 RUN apk --no-cache add ca-certificates python3 py3-pip py3-beautifulsoup4 py3-requests
 
@@ -35,13 +42,13 @@ COPY --from=builder /app/prompt.txt .
 # Копируем Joomla утилиты
 COPY --from=builder /app/joomla/ ./joomla/
 
-# Создаём config.py из переменных окружения
-RUN echo "# Auto-generated config from environment variables" > joomla/config.py && \
-    echo "SITE_URL = '${JOOMLA_SITE_URL:-https://plk32.ru}'" >> joomla/config.py && \
-    echo "ADMIN_URL = '${JOOMLA_ADMIN_URL:-https://plk32.ru/administrator}'" >> joomla/config.py && \
-    echo "USERNAME = '${JOOMLA_USERNAME:-}'" >> joomla/config.py && \
-    echo "PASSWORD = '${JOOMLA_PASSWORD:-}'" >> joomla/config.py && \
-    echo "API_TOKEN = '${JOOMLA_API_TOKEN:-}'" >> joomla/config.py && \
+# Создаём config.py из аргументов сборки
+RUN echo "# Auto-generated config from build args" > joomla/config.py && \
+    echo "SITE_URL = '${JOOMLA_SITE_URL}'" >> joomla/config.py && \
+    echo "ADMIN_URL = '${JOOMLA_ADMIN_URL}'" >> joomla/config.py && \
+    echo "USERNAME = '${JOOMLA_USERNAME}'" >> joomla/config.py && \
+    echo "PASSWORD = '${JOOMLA_PASSWORD}'" >> joomla/config.py && \
+    echo "API_TOKEN = '${JOOMLA_API_TOKEN}'" >> joomla/config.py && \
     echo "REQUEST_TIMEOUT = 30" >> joomla/config.py && \
     echo "VERIFY_SSL = True" >> joomla/config.py && \
     echo "USER_AGENT = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'" >> joomla/config.py && \
