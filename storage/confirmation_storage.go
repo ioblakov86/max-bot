@@ -114,6 +114,19 @@ func (s *ConfirmationStorage) MarkAnswered(messageID string, answer string) erro
 	return fmt.Errorf("confirmation not found")
 }
 
+// GetPendingForUser gets the first pending (not answered) confirmation for a user
+func (s *ConfirmationStorage) GetPendingForUser(userID int64) (*PendingConfirmation, string) {
+	s.Mutex.RLock()
+	defer s.Mutex.RUnlock()
+	
+	for msgID, conf := range s.confirmations {
+		if !conf.Answered && conf.UserID == userID {
+			return conf, msgID
+		}
+	}
+	return nil, ""
+}
+
 // IsAnswered checks if a confirmation has already been answered
 func (s *ConfirmationStorage) IsAnswered(messageID string) bool {
 	s.Mutex.RLock()

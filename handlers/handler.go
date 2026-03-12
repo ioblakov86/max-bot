@@ -534,21 +534,12 @@ func (h *MessageHandler) sendSimpleResponse(chatID int64, text string) error {
 func (h *MessageHandler) handleConfirmationReply(msg schemes.Message, answer string) error {
 	log.Printf("Handling confirmation reply: '%s'", answer)
 	
-	// Get the last pending confirmation for this admin
+	// Get the pending confirmation for this admin
 	var pendingConf *storage.PendingConfirmation
 	var pendingMessageID string
 	
 	if h.ConfirmationStorage != nil {
-		// Find first pending (not answered) confirmation
-		h.ConfirmationStorage.Mutex.RLock()
-		for msgID, conf := range h.ConfirmationStorage.confirmations {
-			if !conf.Answered && conf.UserID == h.AdminUserID {
-				pendingConf = conf
-				pendingMessageID = msgID
-				break
-			}
-		}
-		h.ConfirmationStorage.Mutex.RUnlock()
+		pendingConf, pendingMessageID = h.ConfirmationStorage.GetPendingForUser(h.AdminUserID)
 	}
 	
 	if pendingConf == nil {
@@ -587,8 +578,8 @@ func (h *MessageHandler) handleConfirmationReply(msg schemes.Message, answer str
 	} else {
 		errorsText := strings.Join(response.Errors, "\n")
 		if len(response.UpdatedArticles) > 0 {
-			msg := fmt.Sprintf("⚠️ Частично выполнено.\nОбновлено статей: %d\nОшибки:\n%s", len(response.UpdatedArticles), errorsText)
-			return h.sendSimpleResponse(msg.Recipient.ChatId, msg)
+			responseMsg := fmt.Sprintf("⚠️ Частично выполнено.\nОбновлено статей: %d\nОшибки:\n%s", len(response.UpdatedArticles), errorsText)
+			return h.sendSimpleResponse(msg.Recipient.ChatId, responseMsg)
 		}
 		return h.sendSimpleResponse(msg.Recipient.ChatId, fmt.Sprintf("❌ Ошибка обновления:\n%s", errorsText))
 	}
