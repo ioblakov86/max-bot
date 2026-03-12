@@ -27,7 +27,7 @@ type PendingConfirmation struct {
 type ConfirmationStorage struct {
 	filePath      string
 	confirmations map[string]*PendingConfirmation // key: message_id
-	mutex         sync.RWMutex
+	Mutex         sync.RWMutex
 }
 
 // NewConfirmationStorage creates a new confirmation storage
@@ -49,8 +49,8 @@ func NewConfirmationStorage(filePath string) (*ConfirmationStorage, error) {
 
 // Load reads confirmation data from the JSON file
 func (s *ConfirmationStorage) Load() error {
-	s.mutex.Lock()
-	defer s.mutex.Unlock()
+	s.Mutex.Lock()
+	defer s.Mutex.Unlock()
 
 	data, err := os.ReadFile(s.filePath)
 	if err != nil {
@@ -68,8 +68,8 @@ func (s *ConfirmationStorage) Load() error {
 
 // Save writes confirmation data to the JSON file
 func (s *ConfirmationStorage) Save() error {
-	s.mutex.RLock()
-	defer s.mutex.RUnlock()
+	s.Mutex.RLock()
+	defer s.Mutex.RUnlock()
 
 	data, err := json.MarshalIndent(s.confirmations, "", "  ")
 	if err != nil {
@@ -85,8 +85,8 @@ func (s *ConfirmationStorage) Save() error {
 
 // AddConfirmation adds a new pending confirmation
 func (s *ConfirmationStorage) AddConfirmation(conf *PendingConfirmation) error {
-	s.mutex.Lock()
-	defer s.mutex.Unlock()
+	s.Mutex.Lock()
+	defer s.Mutex.Unlock()
 
 	s.confirmations[conf.MessageID] = conf
 	return s.Save()
@@ -94,8 +94,8 @@ func (s *ConfirmationStorage) AddConfirmation(conf *PendingConfirmation) error {
 
 // GetConfirmation retrieves a confirmation by message ID
 func (s *ConfirmationStorage) GetConfirmation(messageID string) (*PendingConfirmation, bool) {
-	s.mutex.RLock()
-	defer s.mutex.RUnlock()
+	s.Mutex.RLock()
+	defer s.Mutex.RUnlock()
 
 	conf, exists := s.confirmations[messageID]
 	return conf, exists
@@ -103,8 +103,8 @@ func (s *ConfirmationStorage) GetConfirmation(messageID string) (*PendingConfirm
 
 // MarkAnswered marks a confirmation as answered
 func (s *ConfirmationStorage) MarkAnswered(messageID string, answer string) error {
-	s.mutex.Lock()
-	defer s.mutex.Unlock()
+	s.Mutex.Lock()
+	defer s.Mutex.Unlock()
 
 	if conf, exists := s.confirmations[messageID]; exists {
 		conf.Answered = true
@@ -116,8 +116,8 @@ func (s *ConfirmationStorage) MarkAnswered(messageID string, answer string) erro
 
 // IsAnswered checks if a confirmation has already been answered
 func (s *ConfirmationStorage) IsAnswered(messageID string) bool {
-	s.mutex.RLock()
-	defer s.mutex.RUnlock()
+	s.Mutex.RLock()
+	defer s.Mutex.RUnlock()
 
 	if conf, exists := s.confirmations[messageID]; exists {
 		return conf.Answered
@@ -127,8 +127,8 @@ func (s *ConfirmationStorage) IsAnswered(messageID string) bool {
 
 // GetPendingForMessage gets a pending (not answered) confirmation for a message
 func (s *ConfirmationStorage) GetPendingForMessage(messageID string) (*PendingConfirmation, bool) {
-	s.mutex.RLock()
-	defer s.mutex.RUnlock()
+	s.Mutex.RLock()
+	defer s.Mutex.RUnlock()
 
 	if conf, exists := s.confirmations[messageID]; exists && !conf.Answered {
 		return conf, true
@@ -138,8 +138,8 @@ func (s *ConfirmationStorage) GetPendingForMessage(messageID string) (*PendingCo
 
 // CleanupOld removes confirmations older than specified duration
 func (s *ConfirmationStorage) CleanupOld(maxAge time.Duration) error {
-	s.mutex.Lock()
-	defer s.mutex.Unlock()
+	s.Mutex.Lock()
+	defer s.Mutex.Unlock()
 
 	now := time.Now()
 	changed := false

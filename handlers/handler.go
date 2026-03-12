@@ -207,10 +207,13 @@ func (h *MessageHandler) Handle(update schemes.UpdateInterface) error {
 	log.Printf("Received message - UserID: %d, ChatID: %d, ChatType: %v, Text: %s",
 		msg.Sender.UserId, msg.Recipient.ChatId, msg.Recipient.ChatType, msg.Body.Text)
 
-	// Check if this is a reply to bot's confirmation request (admin chat only)
-	if msg.Recipient.ChatId == h.AdminChatID && msg.ReplyToMessageID != "" {
-		log.Printf("Message is a reply to message %s", msg.ReplyToMessageID)
-		return h.handleConfirmationReply(msg)
+	// Check if this is a confirmation reply from admin (text "да"/"нет")
+	if msg.Sender.UserId == h.AdminUserID && msg.Recipient.ChatId == h.AdminChatID {
+		text := strings.TrimSpace(strings.ToLower(msg.Body.Text))
+		if text == "да" || text == "нет" {
+			log.Printf("Detected confirmation reply: '%s'", text)
+			return h.handleConfirmationReply(msg, text)
+		}
 	}
 
 	// Store all messages from all chats except bot's own messages
@@ -527,43 +530,46 @@ func (h *MessageHandler) sendSimpleResponse(chatID int64, text string) error {
 	return nil
 }
 
-// handleConfirmationReply handles admin's reply to confirmation request
-func (h *MessageHandler) handleConfirmationReply(msg schemes.Message) error {
-	text := strings.TrimSpace(strings.ToLower(msg.Body.Text))
-	parentMessageID := msg.ReplyToMessageID
+// handleConfirmationReply handles admin's confirmation reply
+func (h *MessageHandler) handleConfirmationReply(msg schemes.Message, answer string) error {
+	log.Printf("Handling confirmation reply: '%s'", answer)
 	
-	log.Printf("Handling confirmation reply: '%s' to message %s", text, parentMessageID)
+	// Get the last pending confirmation for this admin
+	var pendingConf *storage.PendingConfirmation
+	var pendingMessageID string
 	
-	// Check if we have a pending confirmation for this message
-	conf, exists := h.ConfirmationStorage.GetPendingForMessage(parentMessageID)
-	if !exists {
-		// Check if it was already answered
-		if h.ConfirmationStorage.IsAnswered(parentMessageID) {
-			return h.sendSimpleResponse(msg.Recipient.ChatId, "ℹ️ Это сообщение уже было обработано ранее")
+	if h.ConfirmationStorage != nil {
+		// Find first pending (not answered) confirmation
+		h.ConfirmationStorage.Mutex.RLock()
+		for msgID, conf := range h.ConfirmationStorage.confirmations {
+			if !conf.Answered && conf.UserID == h.AdminUserID {
+				pendingConf = conf
+				pendingMessageID = msgID
+				break
+			}
 		}
-		return h.sendSimpleResponse(msg.Recipient.ChatId, "⚠️ Не найдено ожидающее подтверждение для этого сообщения")
+		h.ConfirmationStorage.Mutex.RUnlock()
 	}
 	
-	// Validate answer
-	if text != "да" && text != "нет" {
-		return h.sendSimpleResponse(msg.Recipient.ChatId, "❌ Пожалуйста, ответьте 'Да' или 'Нет'")
+	if pendingConf == nil {
+		return h.sendSimpleResponse(msg.Recipient.ChatId, "ℹ️ Нет ожидающих подтверждений")
 	}
 	
 	// Mark as answered
-	if err := h.ConfirmationStorage.MarkAnswered(parentMessageID, text); err != nil {
+	if err := h.ConfirmationStorage.MarkAnswered(pendingMessageID, answer); err != nil {
 		log.Printf("Error marking confirmation as answered: %v", err)
 	}
 	
-	if text == "нет" {
+	if answer == "нет" {
 		log.Printf("User %d cancelled the changes", msg.Sender.UserId)
 		return h.sendSimpleResponse(msg.Recipient.ChatId, "❌ Действие отменено")
 	}
 	
 	// User confirmed - apply changes
-	log.Printf("User %d confirmed changes, applying %d planned changes", msg.Sender.UserId, len(conf.PlannedChanges))
+	log.Printf("User %d confirmed changes, applying %d planned changes", msg.Sender.UserId, len(pendingConf.PlannedChanges))
 	h.sendSimpleResponse(msg.Recipient.ChatId, "⏳ Применяю изменения на сайте...")
 	
-	response, err := h.JoomlaClient.Apply(conf.Analysis, conf.PlannedChanges)
+	response, err := h.JoomlaClient.Apply(pendingConf.Analysis, pendingConf.PlannedChanges)
 	if err != nil {
 		log.Printf("Joomla apply error: %v", err)
 		return h.sendSimpleResponse(msg.Recipient.ChatId, fmt.Sprintf("❌ Ошибка: %v", err))
@@ -642,21 +648,21 @@ func (h *MessageHandler) analyzeMessageWithAI(msg schemes.Message) {
 				formattedMessage := h.formatAnalysisMessage(joomlaAnalysis, plannedChanges, joomlaError)
 				
 				// Add confirmation prompt
-				formattedMessage += "\n\n❓ Внести изменения на сайт?\nОтветьте 'Да' или 'Нет' на это сообщение"
+				formattedMessage += "\n\n❓ Внести изменения на сайт?\nОтветьте 'Да' или 'Нет'"
 
 				if adminChatID != 0 {
 					// Send message WITHOUT keyboard
-					messageID, err := h.Bot.SendMessage(adminChatID, formattedMessage)
+					err := h.Bot.SendMessage(adminChatID, formattedMessage)
 					if err != nil {
 						log.Printf("Error sending AI analysis to admin's chat %d: %v", adminChatID, err)
 					} else {
-						log.Printf("Successfully sent AI analysis to admin's chat %d, message ID: %s", adminChatID, messageID)
+						log.Printf("Successfully sent AI analysis to admin's chat %d", adminChatID)
 
-						// Save pending confirmation
+						// Save pending confirmation with a unique key (timestamp + employee name)
 						if h.ConfirmationStorage != nil {
+							confKey := fmt.Sprintf("%d_%s", time.Now().Unix(), joomlaAnalysis.Employee.FullName)
 							conf := &storage.PendingConfirmation{
-								MessageID:      messageID,
-								ParentMessageID: msg.Body.Mid, // ID исходного сообщения в чате
+								MessageID:      confKey,
 								ChatID:         adminChatID,
 								UserID:         h.AdminUserID,
 								Analysis:       joomlaAnalysis,
@@ -667,7 +673,7 @@ func (h *MessageHandler) analyzeMessageWithAI(msg schemes.Message) {
 							if err := h.ConfirmationStorage.AddConfirmation(conf); err != nil {
 								log.Printf("Error saving pending confirmation: %v", err)
 							} else {
-								log.Printf("Saved pending confirmation for message %s", messageID)
+								log.Printf("Saved pending confirmation with key %s", confKey)
 							}
 						}
 					}
