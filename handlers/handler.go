@@ -283,6 +283,10 @@ func (h *MessageHandler) handleCallbackQuery(update schemes.UpdateInterface) err
 	switch payload {
 	case "accept":
 		log.Printf("User %d accepted the changes", userID)
+		log.Printf("DEBUG: Starting accept processing")
+
+		// Сразу отправляем подтверждение
+		h.sendSimpleResponse(chatID, "⏳ Получено! Обрабатываю...")
 
 		// Извлекаем анализ из текста сообщения
 		log.Printf("Extracting analysis from message: %s...", callbackUpdate.Message.Body.Text[:50])
