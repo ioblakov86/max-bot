@@ -96,14 +96,15 @@ func (ms *MessageStorage) GetAllChats() []int64 {
 
 // MessageHandler handles incoming messages
 type MessageHandler struct {
-	Bot              *bot.BotClient
-	MessageStore     *MessageStorage
-	AdminUserID      int64 // Admin user ID: +79310071775
-	AdminChatID      int64 // Admin's chat ID for notifications (from environment variable)
-	TrackedChatID    int64 // ID of the chat to track for AI analysis
-	AIAnalyzer       *ai.OpenRouterConfig
-	CallbackStorage  *storage.CallbackStorage // Persistent storage for callback results
-	JoomlaClient     *joomla.JoomlaClient     // Client for Joomla integration
+	Bot                   *bot.BotClient
+	MessageStore          *MessageStorage
+	AdminUserID           int64
+	AdminChatID           int64
+	TrackedChatID         int64
+	AIAnalyzer            *ai.OpenRouterConfig
+	CallbackStorage       *storage.CallbackStorage
+	JoomlaClient          *joomla.JoomlaClient
+	ConfirmationStorage   *storage.ConfirmationStorage // New storage for pending confirmations
 }
 
 // NewMessageHandler creates a new message handler
@@ -163,24 +164,31 @@ func NewMessageHandler(bot *bot.BotClient, adminUserID int64) *MessageHandler {
 		log.Printf("Warning: Failed to initialize callback storage: %v", err)
 	}
 
+	// Initialize confirmation storage
+	confirmationStorage, err := storage.NewConfirmationStorage("pending_confirmations.json")
+	if err != nil {
+		log.Printf("Warning: Failed to initialize confirmation storage: %v", err)
+	}
+
 	// Initialize Joomla client
 	joomlaClient := joomla.NewJoomlaClient()
 
 	return &MessageHandler{
-		Bot:             bot,
-		MessageStore:    NewMessageStorage(),
-		AdminUserID:     adminUserID,
-		AdminChatID:     adminChatID,
-		TrackedChatID:   trackedChatID,
-		AIAnalyzer:      ai.NewOpenRouterConfig(prompt),
-		CallbackStorage: callbackStorage,
-		JoomlaClient:    joomlaClient,
+		Bot:                 bot,
+		MessageStore:        NewMessageStorage(),
+		AdminUserID:         adminUserID,
+		AdminChatID:         adminChatID,
+		TrackedChatID:       trackedChatID,
+		AIAnalyzer:          ai.NewOpenRouterConfig(prompt),
+		CallbackStorage:     callbackStorage,
+		JoomlaClient:        joomlaClient,
+		ConfirmationStorage: confirmationStorage,
 	}
 }
 
 // Handle processes incoming messages and responds accordingly
 func (h *MessageHandler) Handle(update schemes.UpdateInterface) error {
-	// Handle callback queries from inline keyboard buttons
+	// Handle callback queries from inline keyboard buttons (deprecated but keep for compatibility)
 	if update.GetUpdateType() == schemes.TypeMessageCallback {
 		return h.handleCallbackQuery(update)
 	}
@@ -198,6 +206,12 @@ func (h *MessageHandler) Handle(update schemes.UpdateInterface) error {
 	msg := msgUpdate.Message
 	log.Printf("Received message - UserID: %d, ChatID: %d, ChatType: %v, Text: %s",
 		msg.Sender.UserId, msg.Recipient.ChatId, msg.Recipient.ChatType, msg.Body.Text)
+
+	// Check if this is a reply to bot's confirmation request (admin chat only)
+	if msg.Recipient.ChatId == h.AdminChatID && msg.ReplyToMessageID != "" {
+		log.Printf("Message is a reply to message %s", msg.ReplyToMessageID)
+		return h.handleConfirmationReply(msg)
+	}
 
 	// Store all messages from all chats except bot's own messages
 	if msg.Sender.UserId != 0 {
@@ -513,6 +527,67 @@ func (h *MessageHandler) sendSimpleResponse(chatID int64, text string) error {
 	return nil
 }
 
+// handleConfirmationReply handles admin's reply to confirmation request
+func (h *MessageHandler) handleConfirmationReply(msg schemes.Message) error {
+	text := strings.TrimSpace(strings.ToLower(msg.Body.Text))
+	parentMessageID := msg.ReplyToMessageID
+	
+	log.Printf("Handling confirmation reply: '%s' to message %s", text, parentMessageID)
+	
+	// Check if we have a pending confirmation for this message
+	conf, exists := h.ConfirmationStorage.GetPendingForMessage(parentMessageID)
+	if !exists {
+		// Check if it was already answered
+		if h.ConfirmationStorage.IsAnswered(parentMessageID) {
+			return h.sendSimpleResponse(msg.Recipient.ChatId, "ℹ️ Это сообщение уже было обработано ранее")
+		}
+		return h.sendSimpleResponse(msg.Recipient.ChatId, "⚠️ Не найдено ожидающее подтверждение для этого сообщения")
+	}
+	
+	// Validate answer
+	if text != "да" && text != "нет" {
+		return h.sendSimpleResponse(msg.Recipient.ChatId, "❌ Пожалуйста, ответьте 'Да' или 'Нет'")
+	}
+	
+	// Mark as answered
+	if err := h.ConfirmationStorage.MarkAnswered(parentMessageID, text); err != nil {
+		log.Printf("Error marking confirmation as answered: %v", err)
+	}
+	
+	if text == "нет" {
+		log.Printf("User %d cancelled the changes", msg.Sender.UserId)
+		return h.sendSimpleResponse(msg.Recipient.ChatId, "❌ Действие отменено")
+	}
+	
+	// User confirmed - apply changes
+	log.Printf("User %d confirmed changes, applying %d planned changes", msg.Sender.UserId, len(conf.PlannedChanges))
+	h.sendSimpleResponse(msg.Recipient.ChatId, "⏳ Применяю изменения на сайте...")
+	
+	response, err := h.JoomlaClient.Apply(conf.Analysis, conf.PlannedChanges)
+	if err != nil {
+		log.Printf("Joomla apply error: %v", err)
+		return h.sendSimpleResponse(msg.Recipient.ChatId, fmt.Sprintf("❌ Ошибка: %v", err))
+	}
+	
+	if response == nil {
+		return h.sendSimpleResponse(msg.Recipient.ChatId, "❌ Ошибка: пустой ответ от Joomla")
+	}
+	
+	if response.Success && len(response.UpdatedArticles) > 0 {
+		msg := fmt.Sprintf("✅ Успешно обновлено статей: %d\nСтатьи: %v", len(response.UpdatedArticles), response.UpdatedArticles)
+		return h.sendSimpleResponse(msg.Recipient.ChatId, msg)
+	} else if response.Success {
+		return h.sendSimpleResponse(msg.Recipient.ChatId, "✅ Изменений не потребовалось (статус Продолжение)")
+	} else {
+		errorsText := strings.Join(response.Errors, "\n")
+		if len(response.UpdatedArticles) > 0 {
+			msg := fmt.Sprintf("⚠️ Частично выполнено.\nОбновлено статей: %d\nОшибки:\n%s", len(response.UpdatedArticles), errorsText)
+			return h.sendSimpleResponse(msg.Recipient.ChatId, msg)
+		}
+		return h.sendSimpleResponse(msg.Recipient.ChatId, fmt.Sprintf("❌ Ошибка обновления:\n%s", errorsText))
+	}
+}
+
 // analyzeMessageWithAI performs AI analysis on a message if it's from the tracked chat
 func (h *MessageHandler) analyzeMessageWithAI(msg schemes.Message) {
 	if h.AIAnalyzer == nil {
@@ -561,50 +636,43 @@ func (h *MessageHandler) analyzeMessageWithAI(msg schemes.Message) {
 
 			// Send the analysis result to the admin user's private chat
 			if h.AdminUserID != 0 {
-				// Use the admin's chat ID from environment variable or previously set value
 				adminChatID := h.AdminChatID
 
-				// Format the analysis result in a readable way with markdown and emojis
+				// Format the analysis result
 				formattedMessage := h.formatAnalysisMessage(joomlaAnalysis, plannedChanges, joomlaError)
+				
+				// Add confirmation prompt
+				formattedMessage += "\n\n❓ Внести изменения на сайт?\nОтветьте 'Да' или 'Нет' на это сообщение"
 
-				// Only send if we have a valid chat ID
 				if adminChatID != 0 {
-					buttons := [][]bot.InlineKeyboardButton{
-						{
-							{Text: "Принять", Data: "accept"},
-							{Text: "Отмена", Data: "cancel"},
-						},
-					}
-					messageID, err := h.Bot.SendMessageWithKeyboard(adminChatID, formattedMessage, buttons)
+					// Send message WITHOUT keyboard
+					messageID, err := h.Bot.SendMessage(adminChatID, formattedMessage)
 					if err != nil {
-						log.Printf("Error sending formatted AI analysis to admin's chat %d: %v", adminChatID, err)
+						log.Printf("Error sending AI analysis to admin's chat %d: %v", adminChatID, err)
 					} else {
-						log.Printf("Successfully sent formatted AI analysis to admin's chat %d with message ID: %s for employee: %s", adminChatID, messageID, analysis.Employee.FullName)
+						log.Printf("Successfully sent AI analysis to admin's chat %d, message ID: %s", adminChatID, messageID)
 
-						// Save the analysis and planned changes to callback storage
-						// We use the message ID as the callback key
-						if h.CallbackStorage != nil {
-							// Store analysis and planned changes for later use when user clicks "accept"
-							result := storage.CallbackResult{
-								CallbackID:     messageID, // Will be matched with callback_id
-								UserID:         0,         // Will be set when user clicks
+						// Save pending confirmation
+						if h.ConfirmationStorage != nil {
+							conf := &storage.PendingConfirmation{
+								MessageID:      messageID,
+								ParentMessageID: msg.Body.Mid, // ID исходного сообщения в чате
 								ChatID:         adminChatID,
-								Payload:        "",        // Will be set when user clicks
-								MessageText:    formattedMessage,
-								ProcessedAt:    time.Now(),
-								Analysis:       &joomlaAnalysis,
+								UserID:         h.AdminUserID,
+								Analysis:       joomlaAnalysis,
 								PlannedChanges: plannedChanges,
+								CreatedAt:      time.Now(),
+								Answered:       false,
 							}
-							// Save immediately so we can retrieve it when user clicks
-							if err := h.CallbackStorage.AddResult(result); err != nil {
-								log.Printf("Error saving callback result with analysis: %v", err)
+							if err := h.ConfirmationStorage.AddConfirmation(conf); err != nil {
+								log.Printf("Error saving pending confirmation: %v", err)
 							} else {
-								log.Printf("Saved analysis for message %s with %d planned changes", messageID, len(plannedChanges))
+								log.Printf("Saved pending confirmation for message %s", messageID)
 							}
 						}
 					}
 				} else {
-					log.Printf("Cannot send AI analysis to admin: ADMIN_CHAT_ID not set in environment variables")
+					log.Printf("Cannot send AI analysis: ADMIN_CHAT_ID not set")
 				}
 			}
 		}
