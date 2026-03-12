@@ -569,10 +569,10 @@ func (h *MessageHandler) handleConfirmationReply(msg schemes.Message, answer str
 	if response == nil {
 		return h.sendSimpleResponse(msg.Recipient.ChatId, "❌ Ошибка: пустой ответ от Joomla")
 	}
-	
+
 	if response.Success && len(response.UpdatedArticles) > 0 {
-		msg := fmt.Sprintf("✅ Успешно обновлено статей: %d\nСтатьи: %v", len(response.UpdatedArticles), response.UpdatedArticles)
-		return h.sendSimpleResponse(msg.Recipient.ChatId, msg)
+		successMsg := fmt.Sprintf("✅ Успешно обновлено статей: %d\nСтатьи: %v", len(response.UpdatedArticles), response.UpdatedArticles)
+		return h.sendSimpleResponse(msg.Recipient.ChatId, successMsg)
 	} else if response.Success {
 		return h.sendSimpleResponse(msg.Recipient.ChatId, "✅ Изменений не потребовалось (статус Продолжение)")
 	} else {
