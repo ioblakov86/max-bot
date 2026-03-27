@@ -234,11 +234,12 @@ func (h *MessageHandler) Handle(update schemes.UpdateInterface) error {
 	log.Printf("Chat type check - Is group/channel: %v, ChatType: %v", isGroupChat, msg.Recipient.ChatType)
 
 	botMentioned := h.isBotMentioned(msg.Body.Text)
-	log.Printf("Bot mention check - Text: '%s', Mentioned: %v", msg.Body.Text, botMentioned)
+	replyToBot := h.isReplyToBot(msg)
+	log.Printf("Bot mention check - Text: '%s', Mentioned: %v, ReplyToBot: %v", msg.Body.Text, botMentioned, replyToBot)
 
-	// Handle group chat mentions
-	if isGroupChat && botMentioned {
-		log.Printf("Responding to bot mention in chat %d", msg.Recipient.ChatId)
+	// Handle group chat mentions or replies to bot
+	if isGroupChat && (botMentioned || replyToBot) {
+		log.Printf("Responding to bot mention/reply in chat %d", msg.Recipient.ChatId)
 		return h.sendSimpleResponse(msg.Recipient.ChatId, "Извините, я пока не умею разговаривать.")
 	}
 
@@ -412,20 +413,21 @@ func (h *MessageHandler) handleCallbackQuery(update schemes.UpdateInterface) err
 	}
 }
 
-// isBotMentioned checks if the bot is mentioned in the message
+// isBotMentioned checks if the bot is mentioned or replied to
 func (h *MessageHandler) isBotMentioned(text string) bool {
-	lowerText := strings.ToLower(text)
-
-	// Check for bot mentions
-	keywords := []string{"@bot", "бот,", "бот ", "bot,", "bot "}
-	for _, keyword := range keywords {
-		if strings.Contains(lowerText, keyword) {
-			return true
-		}
+	// Check for @spbgp32_bot mention
+	if strings.Contains(text, "@spbgp32_bot") {
+		return true
 	}
+	
+	return false
+}
 
-	// Check for commands
-	return strings.HasPrefix(lowerText, "/")
+// isReplyToBot checks if the message is a reply to bot's message
+func (h *MessageHandler) isReplyToBot(msg schemes.Message) bool {
+	// Max Messenger doesn't provide reply_to_message_id in the standard scheme
+	// This would need to be added to the scheme if available
+	return false
 }
 
 // handlePrivateMessage handles private messages
